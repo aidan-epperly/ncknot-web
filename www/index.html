@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Knot Workbench</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4 L27 24 L5 24 Z' fill='none' stroke='%232f5fd0' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Knot Workbench</h1>
+    <p class="tagline">Draw a knot or build a braid; invariants update as you edit.</p>
+  </header>
+
+  <main>
+    <section class="editor panel" aria-label="Diagram editor">
+      <div class="toolbar" role="toolbar">
+        <div class="group" role="radiogroup" aria-label="Mode">
+          <button data-mode="draw" class="mode" title="Click to place vertices; click the first vertex to close (D)">Draw</button>
+          <button data-mode="edit" class="mode" title="Drag vertices, click a crossing to flip it (E)">Edit</button>
+          <button data-mode="twist" class="mode" title="Click two neighboring strands to put a twist box on them (T)">Twist box</button>
+        </div>
+        <div class="group">
+          <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+          <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+        </div>
+        <div class="group">
+          <button id="alternate" title="Choose crossings so every strand alternates over and under">Alternate</button>
+          <button id="mirror" title="Flip every crossing">Mirror</button>
+          <button id="reverse" title="Reverse the orientation of every component">Reverse</button>
+        </div>
+        <div class="group">
+          <button id="tidy" title="Redraw the diagram by automatic layout">Tidy</button>
+          <button id="fit" title="Fit the drawing to the view">Fit</button>
+          <button id="clear" title="Remove everything">Clear</button>
+        </div>
+        <div class="group">
+          <button id="share" title="Copy a link to this drawing">Share link</button>
+          <button id="svg" title="Download the drawing as SVG">SVG</button>
+        </div>
+      </div>
+
+      <div class="canvas-wrap">
+        <svg id="canvas" role="img" aria-label="Knot diagram"></svg>
+        <div id="banner" class="banner" hidden></div>
+        <div id="hint" class="hint"></div>
+        <div id="box-panel" class="box-panel" hidden>
+          <span class="box-title">Twist box</span>
+          <button id="box-minus" title="One half-twist less (−)">−</button>
+          <input id="box-n" type="number" step="1" aria-label="Half-twists">
+          <button id="box-plus" title="One half-twist more (+)">+</button>
+          <label title="Draw the crossings instead of the number"><input type="checkbox" id="box-show"> show twists</label>
+          <button id="box-delete" title="Remove the box (Delete)">Remove</button>
+        </div>
+      </div>
+
+      <details class="builder" open>
+        <summary>Braids and the knot table</summary>
+        <div class="builder-body">
+          <label>Knot table
+            <select id="library"><option value="">choose…</option></select>
+          </label>
+          <label>Strands
+            <input id="strands" type="number" min="2" max="8" value="3">
+          </label>
+          <div id="generators" class="generators" aria-label="Braid generators"></div>
+          <label class="word">Braid word
+            <input id="word" type="text" spellcheck="false" placeholder="e.g. 1 -2 1 -2  (i = σᵢ, −i = σᵢ⁻¹)">
+          </label>
+          <div class="row">
+            <button id="draw-braid">Draw closure</button>
+            <button id="clear-word">Clear word</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="builder">
+        <summary>PD code</summary>
+        <div class="builder-body">
+          <textarea id="pd-input" rows="3" spellcheck="false" placeholder="X[1,4,2,5], X[3,6,4,1], X[5,2,6,3]"></textarea>
+          <div class="row">
+            <button id="use-pd">Draw PD code</button>
+          </div>
+          <p class="note">The code is drawn by automatic layout (a Tutte embedding); edit it like any drawing.</p>
+        </div>
+      </details>
+    </section>
+
+    <section class="results panel" aria-label="Invariants" aria-live="polite">
+      <div id="ident" class="ident"></div>
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <h2>Jones polynomial <span class="sym">V(t)</span></h2>
+        <div id="jones" class="poly"></div>
+      </div>
+      <div class="card">
+        <h2>Alexander polynomial <span class="sym">Δ(t)</span> <span id="alex-note" class="note"></span></h2>
+        <div id="alexander" class="poly"></div>
+      </div>
+      <div class="card" id="conway-card">
+        <h2>Conway polynomial <span class="sym">∇(z)</span></h2>
+        <div id="conway" class="poly"></div>
+      </div>
+      <div class="card two">
+        <div>
+          <h2>Fox colorings
+            <select id="prime" aria-label="Prime p">
+              <option>2</option><option selected>3</option><option>5</option><option>7</option>
+              <option>11</option><option>13</option><option>17</option><option>19</option>
+            </select>
+          </h2>
+          <div id="colorings" class="value"></div>
+        </div>
+        <div>
+          <h2><span class="sym">H₁</span> of the double branched cover</h2>
+          <div id="cover" class="value"></div>
+        </div>
+      </div>
+      <div class="card" id="linking-card">
+        <h2>Linking numbers</h2>
+        <div id="linking"></div>
+      </div>
+
+      <div class="card" id="family-card" hidden>
+        <h2>Twist family <span class="note">the selected box with n half-twists</span></h2>
+        <div class="row">
+          <label>n from <input id="fam-from" type="number" step="1"></label>
+          <label>to <input id="fam-to" type="number" step="1"></label>
+          <button id="fam-go">Compute</button>
+          <button id="fam-cancel" hidden>Cancel</button>
+          <span id="fam-status" class="note"></span>
+        </div>
+        <div id="family" class="khovanov"></div>
+      </div>
+
+      <div class="card">
+        <h2>Khovanov homology</h2>
+        <div class="row">
+          <select id="ring" aria-label="Coefficients">
+            <option value="Z">ℤ (with torsion)</option>
+            <option value="2">𝔽₂</option>
+            <option value="3">𝔽₃</option>
+            <option value="5">𝔽₅</option>
+          </select>
+          <button id="kh-go">Compute</button>
+          <button id="kh-cancel" hidden>Cancel</button>
+          <span id="kh-status" class="note"></span>
+        </div>
+        <div id="khovanov" class="khovanov"></div>
+      </div>
+
+      <div class="card">
+        <h2>Representations of the knot group</h2>
+        <div class="row">
+          <label>to <span class="sym">S</span><sub>m</sub>, m =
+            <select id="sym-m"><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select>
+          </label>
+          <label><input type="checkbox" id="sym-trans"> transitive only</label>
+          <button id="homs-go">Count</button>
+          <button id="homs-cancel" hidden>Cancel</button>
+        </div>
+        <div id="homs" class="value"></div>
+      </div>
+
+      <div class="card">
+        <h2>PD code <button id="copy-pd" class="small">Copy</button></h2>
+        <code id="pd" class="pd"></code>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Computed exactly in the browser by <code>ncknot</code> (Rust → WebAssembly).
+    Conventions: σᵢ and the right-handed trefoil are positive; σ(right-handed trefoil) = −2.
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

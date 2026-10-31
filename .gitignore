@@ -1,0 +1,5 @@
+target/
+www/*.wasm
+__pycache__/
+.claude/
+Cargo.lock
