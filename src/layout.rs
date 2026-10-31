@@ -323,7 +323,11 @@ pub fn layout(d: &Diagram, view: Rect, first_id: u32) -> Result<(Drawing, u32), 
     // Tutte drawings crowd the middle: relax, drop straight vertices, refit
     let iterations = (4000 / (d.crossings() + 10)).clamp(25, 160);
     crate::relax::relax(&mut drawing, iterations);
+    // room around every crossing for the over/under gap and the handles
     crate::relax::simplify(&mut drawing, 0.25);
+    crate::relax::open_crossings(&mut drawing, 0.3, 12);
+    crate::relax::simplify(&mut drawing, 0.25);
+    crate::relax::open_crossings(&mut drawing, 0.3, 12);
     crate::relax::fit(&mut drawing, view);
     Ok((drawing, next))
 }

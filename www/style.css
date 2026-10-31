@@ -141,7 +141,7 @@ footer { padding: 6px 20px 16px; color: var(--muted); font-size: 0.8rem; }
 
 /* svg */
 .strand { vector-effect: non-scaling-stroke; fill: none; stroke-width: 3.2; stroke-linejoin: round; stroke-linecap: round; }
-.halo { vector-effect: non-scaling-stroke; fill: none; stroke: #fbfcfd; stroke-width: 13; stroke-linecap: butt; }
+.halo { vector-effect: non-scaling-stroke; fill: none; stroke: #fbfcfd; stroke-width: 13; stroke-linecap: butt; stroke-linejoin: round; }
 .vertex { fill: #fff; stroke-width: 2; }
 .vertex.hot { r: 7; }
 .xmark { fill: transparent; stroke: none; cursor: pointer; }

@@ -101,6 +101,48 @@ impl Net {
             .all(|v| dist_to_segment(self.pos[v], a, b) >= gap)
     }
 
+    /// May vertex `v` move to `np`?  Both of its segments must cross exactly
+    /// the segments they crossed before, and every clearance (a vertex from a
+    /// segment it does not touch) must stay at least `gap`, or not shrink if it
+    /// is already below `gap`.
+    fn can_move(&self, v: usize, np: P, crossing: &HashMap<usize, HashSet<usize>>, gap: f64) -> bool {
+        let (a, b) = (self.prev[v], self.next[v]);
+        let (pa, pv, pb) = (self.pos[a], self.pos[v], self.pos[b]);
+        if self.crossings_of(a, pa, np, &[]) != crossing[&a]
+            || self.crossings_of(v, np, pb, &[]) != crossing[&v]
+        {
+            return false;
+        }
+        let ok = |new: f64, old: f64| new >= gap.min(old);
+        // other vertices against v's two segments
+        let vertices_ok = self.segs().filter(|&u| u != a && u != v && u != b).all(|u| {
+            let x = self.pos[u];
+            ok(dist_to_segment(x, pa, np), dist_to_segment(x, pa, pv))
+                && ok(dist_to_segment(x, np, pb), dist_to_segment(x, pv, pb))
+        });
+        // v against the other segments
+        vertices_ok
+            && self.segs().filter(|&t| t != a && t != v).all(|t| {
+                let (p, q) = (self.pos[t], self.pos[self.next[t]]);
+                ok(dist_to_segment(np, p, q), dist_to_segment(pv, p, q))
+            })
+    }
+
+    fn crossing_sets(&self) -> HashMap<usize, HashSet<usize>> {
+        self.segs()
+            .map(|s| (s, self.crossings_of(s, self.pos[s], self.pos[self.next[s]], &[])))
+            .collect()
+    }
+
+    fn mean_length(&self) -> f64 {
+        let segs: Vec<usize> = self.segs().collect();
+        let total: f64 = segs
+            .iter()
+            .map(|&s| norm(sub(self.pos[self.next[s]], self.pos[s])))
+            .sum();
+        total / segs.len().max(1) as f64
+    }
+
     fn component_size(&self, v: usize) -> usize {
         let mut k = 1;
         let mut u = self.next[v];
@@ -171,18 +213,93 @@ pub fn relax(d: &mut Drawing, iterations: usize) {
             let scale = (cap / step).min(1.0);
             let np = (p.0 + scale * f.0, p.1 + scale * f.1);
             // accept only if both segments at v cross what they crossed before
-            let ok = net.crossings_of(a, pa, np, &[]) == crossing[&a]
-                && net.crossings_of(v, np, pb, &[]) == crossing[&v]
-                && net.clear(pa, np, &[a, v], gap)
-                && net.clear(np, pb, &[v, b], gap)
-                && net
-                    .segs()
-                    .filter(|&t| t != a && t != v)
-                    .all(|t| dist_to_segment(np, net.pos[t], net.pos[net.next[t]]) >= gap);
-            if ok {
+            if net.can_move(v, np, &crossing, gap) {
                 net.pos[v] = np;
             }
         }
+    }
+    write_back(d, &net, &HashMap::new());
+}
+
+/// Moves vertices that sit close to a crossing away from it, along the
+/// strand they continue on, so that every crossing has room on both strands
+/// (`frac` of the mean segment length on each side, where the strand allows).
+/// Every move keeps all crossings, as in [`relax`].
+pub fn open_crossings(d: &mut Drawing, frac: f64, rounds: usize) {
+    if !d.boxes.is_empty() {
+        return;
+    }
+    let mut net = Net::new(d);
+    if net.pos.len() < 3 {
+        return;
+    }
+    let mut crossing = net.crossing_sets();
+    let l0 = net.mean_length();
+    let (target, gap) = (frac * l0, 0.12 * l0);
+    for _ in 0..rounds {
+        let mut moved = false;
+        // crossing points
+        let mut points = Vec::new();
+        for (&s0, set) in &crossing {
+            for &t in set.iter().filter(|&&t| s0 < t) {
+                let (p, q) = (net.pos[s0], net.pos[net.next[s0]]);
+                let (r, u) = (net.pos[t], net.pos[net.next[t]]);
+                let den = cross(sub(q, p), sub(u, r));
+                if den != 0.0 {
+                    let k = cross(sub(r, p), sub(u, r)) / den;
+                    points.push((p.0 + k * (q.0 - p.0), p.1 + k * (q.1 - p.1)));
+                }
+            }
+        }
+        let verts: Vec<usize> = net.segs().collect();
+        for &x in &points {
+            for &v in &verts {
+                let pv = net.pos[v];
+                let dist = norm(sub(pv, x));
+                if dist >= target {
+                    continue;
+                }
+                // along the segment of v that does not run through the
+                // crossing (moving along the other one would carry v across
+                // it), then the other way, then straight away from it
+                let (a, b) = (net.pos[net.prev[v]], net.pos[net.next[v]]);
+                let (first, second) = if dist_to_segment(x, a, pv) < dist_to_segment(x, pv, b) {
+                    (b, a)
+                } else {
+                    (a, b)
+                };
+                let away = sub(pv, x);
+                let mut candidates = Vec::new();
+                for toward in [first, second] {
+                    let along = sub(toward, pv);
+                    if norm(along) > 1e-12 {
+                        let step = (target - dist).min(0.6 * norm(along));
+                        candidates.push((
+                            pv.0 + step * along.0 / norm(along),
+                            pv.1 + step * along.1 / norm(along),
+                        ));
+                    }
+                }
+                if norm(away) > 1e-12 {
+                    let step = target - dist;
+                    candidates.push((
+                        pv.0 + step * away.0 / norm(away),
+                        pv.1 + step * away.1 / norm(away),
+                    ));
+                }
+                for np in candidates {
+                    if norm(sub(np, x)) > dist && net.can_move(v, np, &crossing, gap) {
+                        net.pos[v] = np;
+                        moved = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !moved {
+            break;
+        }
+        crossing = net.crossing_sets();
     }
     write_back(d, &net, &HashMap::new());
 }

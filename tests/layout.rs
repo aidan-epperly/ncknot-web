@@ -67,3 +67,23 @@ fn random_braids_round_trip() {
         .disjoint_union(&table::diagram("4_1").unwrap());
     round_trip(&u.disjoint_union(&Diagram::unlink(1)), "3_1 + 4_1 + O");
 }
+
+/// Vertices keep a clear distance from every crossing, so the over/under gap
+/// and the editing handles do not sit on top of each other.
+#[test]
+fn crossings_have_room() {
+    for &(name, _, _) in table::BRAIDS {
+        let d = table::diagram(name).unwrap();
+        let (drawing, _) = layout(&d, VIEW, 1).unwrap();
+        let (a, _) = analyze(&drawing).unwrap();
+        let pts: Vec<(f64, f64)> = drawing.components.iter().flatten().map(|v| (v.x, v.y)).collect();
+        let closest = a
+            .crossings
+            .iter()
+            .flat_map(|x| pts.iter().map(move |p| (p.0 - x.x).hypot(p.1 - x.y)))
+            .fold(f64::INFINITY, f64::min);
+        // the over/under halo follows the strand, so a few pixels suffice; most
+        // crossings get far more room
+        assert!(closest > 5.0, "{name}: a vertex {closest:.1} px from a crossing");
+    }
+}

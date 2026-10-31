@@ -16,6 +16,7 @@ let pending = null; // vertices of a component being drawn
 let mode = "edit";
 let view = { x: 0, y: 0, w: 800, h: 560 }; // drawing coordinates shown by the canvas
 let analysis = null; // last successful analyze_drawing
+let lastAnalysis = null; // the last valid one, kept through degenerate frames of a drag
 let pdSource = null; // a PD code entered as text (no picture)
 let idCounter = 1;
 const nextId = () => idCounter++;
@@ -48,6 +49,7 @@ function commit(fromTable = false) {
 let lastCommitted = snapshot();
 function restore(s) {
   const o = JSON.parse(s);
+  analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = o.drawing;
   drawing.boxes ||= [];
   pdSource = o.pdSource;
@@ -172,8 +174,64 @@ function analyze() {
     analysis = null;
     return res.error;
   }
-  analysis = res;
+  if (carryChoices(lastAnalysis, res)) {
+    // re-analyse with the carried choices
+    try {
+      res = knots.analyze(drawing);
+    } catch (e) {
+      res = { error: `internal error (${e})` };
+    }
+    if (res.error) {
+      analysis = null;
+      return res.error;
+    }
+  }
+  analysis = lastAnalysis = res;
   return null;
+}
+
+// A crossing's over/under choice is stored per pair of segments.  When an
+// edit slides a crossing onto the next segment of a strand, its pair changes;
+// carry the choice over from the matching crossing of the previous analysis
+// (same two strands, segments at most two vertices apart, nearby).  Returns
+// whether a choice was added.
+function carryChoices(prev, next) {
+  if (!prev || !next) return false;
+  const where = new Map(); // vertex id -> [component, index, length]
+  drawing.components.forEach((poly, c) => poly.forEach((v, k) => where.set(v.id, [c, k, poly.length])));
+  const key = (a, b) => `${Math.min(a, b)}:${Math.max(a, b)}`;
+  const chosen = new Set(drawing.over.map(([a, b]) => key(a, b)));
+  const prevKeys = new Set(prev.crossings.map((x) => key(x.a, x.b)));
+  const near = (s, t) => {
+    const ws = where.get(s);
+    const wt = where.get(t);
+    if (!ws || !wt || ws[0] !== wt[0]) return false;
+    const d = Math.abs(ws[1] - wt[1]);
+    return Math.min(d, ws[2] - d) <= 2;
+  };
+  const used = new Set();
+  let added = false;
+  for (const x of next.crossings) {
+    const k = key(x.a, x.b);
+    if (chosen.has(k) || prevKeys.has(k)) continue; // stored, or unchanged
+    let best = null;
+    prev.crossings.forEach((y, i) => {
+      if (used.has(i)) return;
+      // pair x's segments with y's: (a↔a, b↔b) or swapped
+      for (const [pa, pb] of [[y.a, y.b], [y.b, y.a]]) {
+        if (near(x.a, pa) && near(x.b, pb)) {
+          const d = Math.hypot(x.x - y.x, x.y - y.y);
+          if (!best || d < best.d) best = { d, i, over: y.over === pa ? x.a : x.b };
+        }
+      }
+    });
+    if (best && best.d < 80 / zoom()) {
+      used.add(best.i);
+      drawing.over.push([x.a, x.b, best.over]);
+      added = true;
+    }
+  }
+  return added;
 }
 
 // ---------------------------------------------------------------- rendering
@@ -227,23 +285,19 @@ function render() {
     const b = poly[(best + 1) % poly.length];
     arrow(a, b, color);
   });
-  // over-strands on top: a halo, then the strand again
+  // over-strands on top: a halo, then the strand again, following the strand
+  // through its vertices for a fixed length on both sides of the crossing
   if (analysis) {
+    const index = new Map();
+    drawing.components.forEach((poly, c) => poly.forEach((v, k) => index.set(v.id, [c, k])));
     for (const x of analysis.crossings) {
-      const s = segs.get(x.over);
-      if (!s) continue;
-      const dx = s.q.x - s.p.x;
-      const dy = s.q.y - s.p.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const L = Math.min(14 / zoom(), len / 2);
-      const p1 = { x: x.x - (dx / len) * L, y: x.y - (dy / len) * L };
-      const p2 = { x: x.x + (dx / len) * L, y: x.y + (dy / len) * L };
-      el("line", { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, class: "halo" });
-      el("line", {
-        x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
-        class: "strand",
-        stroke: COLORS[s.c % COLORS.length],
-      });
+      const at = index.get(x.over);
+      if (!at) continue;
+      const [c, k] = at;
+      const pts = overPath(drawing.components[c], k, x, 14 / zoom());
+      const points = pts.map((p) => `${p.x},${p.y}`).join(" ");
+      el("polyline", { points, class: "halo" });
+      el("polyline", { points, class: "strand", stroke: COLORS[c % COLORS.length] });
     }
   }
   drawing.boxes.forEach((b, i) => drawBox(b, i, segs));
@@ -404,6 +458,31 @@ function nearestSegment(p) {
     }),
   );
   return best && best.d < 12 / zoom() ? best.id : null;
+}
+
+// The piece of the strand within arc length L of the point x on segment k.
+function overPath(poly, k, x, L) {
+  const n = poly.length;
+  const walk = (step) => {
+    const out = [];
+    let cur = { x: x.x, y: x.y };
+    let left = L;
+    let i = step > 0 ? (k + 1) % n : k;
+    for (let guard = 0; guard < n && left > 0; guard++) {
+      const v = poly[i];
+      const d = Math.hypot(v.x - cur.x, v.y - cur.y);
+      if (d >= left) {
+        out.push({ x: cur.x + ((v.x - cur.x) * left) / d, y: cur.y + ((v.y - cur.y) * left) / d });
+        break;
+      }
+      out.push({ x: v.x, y: v.y });
+      left -= d;
+      cur = v;
+      i = (i + step + n) % n;
+    }
+    return out;
+  };
+  return [...walk(-1).reverse(), { x: x.x, y: x.y }, ...walk(1)];
 }
 
 function arrow(a, b, color) {
@@ -630,6 +709,7 @@ $("box-show").onchange = () => {
 function drawPD(pd, freeLoops) {
   const res = knots.layout({ pd, free_loops: freeLoops, view, first_id: idCounter });
   if (res.error) return res.error;
+  analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = res.drawing;
   drawing.boxes ||= [];
   idCounter = res.next_id;
@@ -649,6 +729,7 @@ $("tidy").onclick = () => {
 };
 
 $("clear").onclick = () => {
+  analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = { components: [], over: [], boxes: [] };
   pdSource = null;
   commit();
@@ -756,6 +837,7 @@ function drawBraid() {
   } catch (err) {
     return flash(err.message);
   }
+  analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = braidDrawing(n, word, view, nextId);
   pdSource = null;
   commit($("library").value !== "" && $("word").value.trim() === table.find((t) => t.name === $("library").value)?.word.join(" "));
@@ -779,6 +861,7 @@ $("library").onchange = () => {
   if (entry.name === "0_1") {
     const c = { x: view.x + view.w / 2, y: view.y + view.h / 2 };
     const R = Math.min(view.w, view.h) * 0.3;
+    analysis = lastAnalysis = null; // a new drawing: no choices to carry over
     drawing = {
       components: [[...Array(6).keys()].map((k) => ({ id: nextId(), x: c.x + R * Math.cos(k * Math.PI / 3), y: c.y + R * Math.sin(k * Math.PI / 3) }))],
       over: [],
@@ -1041,6 +1124,18 @@ function saveLocal() {
 
 // ---------------------------------------------------------------- start
 
+// read-only hooks for the browser tests
+window.knotWorkbench = {
+  state: () => JSON.parse(JSON.stringify({ drawing, analysis })),
+  toScreen: (x, y) => {
+    const pt = svg.createSVGPoint();
+    pt.x = x;
+    pt.y = y;
+    const q = pt.matrixTransform(svg.getScreenCTM());
+    return { x: q.x, y: q.y };
+  },
+};
+
 async function main() {
   knots = await loadKnots();
   table = knots.table();
@@ -1061,11 +1156,13 @@ async function main() {
   const saved = localStorage.getItem("knot-workbench");
   try {
     if (hash) {
+      analysis = lastAnalysis = null; // a new drawing: no choices to carry over
       drawing = decodeState(hash[1]);
       lastCommitted = snapshot();
       fitView();
     } else if (saved) restore(saved);
   } catch {
+    analysis = lastAnalysis = null; // a new drawing: no choices to carry over
     drawing = { components: [], over: [] };
   }
   for (const c of drawing.components) for (const v of c) idCounter = Math.max(idCounter, v.id + 1);

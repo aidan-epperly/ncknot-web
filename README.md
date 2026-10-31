@@ -134,7 +134,7 @@ tests/geometry.rs native tests: pentagram = 5_1 when alternating, Hopf
                   link signs on screen coordinates, degenerate drawings, API
 tests/twist_boxes.rs  boxes against integer tangle closures (T(2,n), unknot)
 tests/layout.rs   layouts round-trip: table knots, random braids, split links
-tests/browser/    smoke.py, features.py: Playwright (Edge) end-to-end checks
+tests/browser/    smoke.py, features.py, drag.py: Playwright (Edge) end-to-end checks
 build.py          build and serve
 ```
 
@@ -145,6 +145,7 @@ cargo test                                   # geometry and API, native
 python build.py --serve-only 8765 &          # then:
 python tests/browser/smoke.py http://localhost:8765/ target/screenshots
 python tests/browser/features.py http://localhost:8765/ target/screenshots
+python tests/browser/drag.py http://localhost:8765/ target/screenshots
 ```
 
 The browser test runs in Edge and checks:
