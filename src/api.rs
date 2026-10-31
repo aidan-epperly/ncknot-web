@@ -229,6 +229,27 @@ pub fn layout_json(input: &str) -> String {
     }
 }
 
+/// A bundle expansion request: the drawing and the spacing of the copies.
+#[derive(Debug, Deserialize)]
+struct ExpandRequest {
+    drawing: Drawing,
+    spacing: f64,
+}
+
+/// The drawing with its bundles expanded into parallel copies, for display:
+/// `{drawing}`.
+pub fn expand_json(input: &str) -> String {
+    let run = || -> Result<Value, String> {
+        let req: ExpandRequest = serde_json::from_str(input).map_err(|e| e.to_string())?;
+        let d = crate::bundle::expand(&req.drawing, req.spacing)?;
+        Ok(json!({ "drawing": d }))
+    };
+    match run() {
+        Ok(v) => v.to_string(),
+        Err(e) => json!({ "error": e }).to_string(),
+    }
+}
+
 /// Alternating over-strand choices for a drawing (see [`alternating`]).
 pub fn alternating_json(input: &str) -> String {
     let run = || -> Result<Value, String> {

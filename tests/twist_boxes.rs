@@ -29,6 +29,7 @@ fn two_rectangles(n: i64, parallel: bool) -> Drawing {
     Drawing {
         components: vec![a, b],
         over: vec![],
+        mult: Vec::new(),
         // the older two-strand format, still accepted
         boxes: vec![TwistBox {
             a: Some(1),
@@ -84,6 +85,7 @@ fn numerator_closure_is_the_unknot() {
                 &[(0.0, 0.0), (60.0, 0.0), (60.0, 300.0), (0.0, 300.0)],
             )],
             over: vec![],
+            mult: Vec::new(),
             boxes: vec![TwistBox::new(&[1, 3], n)],
         };
         let k = diagram(&d);
@@ -128,6 +130,7 @@ fn nested_loops(k: usize, n: i64) -> Drawing {
     Drawing {
         components,
         over: vec![],
+        mult: Vec::new(),
         boxes: vec![TwistBox::new(&segs, n)],
     }
 }

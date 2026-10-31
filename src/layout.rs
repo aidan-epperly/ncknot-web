@@ -319,6 +319,7 @@ pub fn layout(d: &Diagram, view: Rect, first_id: u32) -> Result<(Drawing, u32), 
         components,
         over,
         boxes: Vec::new(),
+        mult: Vec::new(),
     };
     // Tutte drawings crowd the middle: relax, drop straight vertices, refit
     let iterations = (4000 / (d.crossings() + 10)).clamp(25, 160);

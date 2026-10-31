@@ -34,6 +34,11 @@ pub struct Drawing {
     /// Twist boxes.
     #[serde(default)]
     pub boxes: Vec<TwistBox>,
+    /// Multiplicity of each component (missing entries are 1): a component
+    /// with multiplicity `k` stands for `k` parallel copies; see
+    /// [`crate::bundle`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mult: Vec<u32>,
 }
 
 /// `n` half-twists of a bundle of two or more strands (segments, named by
@@ -59,6 +64,15 @@ impl TwistBox {
     pub fn new(segs: &[u32], n: i64) -> Self {
         TwistBox {
             segs: segs.to_vec(),
+            n,
+            ..Default::default()
+        }
+    }
+
+    /// A box on these strands (owned).
+    pub fn new_segs(segs: Vec<u32>, n: i64) -> Self {
+        TwistBox {
+            segs,
             n,
             ..Default::default()
         }
@@ -239,6 +253,10 @@ type Ends = (i64, i64, (f64, f64));
 /// orientation of every component is then solved over the whole diagram,
 /// keeping the drawn direction where it can.
 pub fn analyze(d: &Drawing) -> Result<(Analysis, Diagram), String> {
+    if crate::bundle::has_bundles(d) {
+        let spacing = crate::bundle::default_spacing(d);
+        return analyze(&crate::bundle::expand(d, spacing)?);
+    }
     let segs = segments(d)?;
     let sizes: Vec<usize> = d.components.iter().map(|p| p.len()).collect();
     let hits = intersections(&segs, &sizes)?;
@@ -452,6 +470,19 @@ pub fn analyze(d: &Drawing) -> Result<(Analysis, Diagram), String> {
         },
         diagram,
     ))
+}
+
+/// A crossing as `(segment, segment, point)`, the point in screen coordinates.
+pub type CrossingPair = (u32, u32, (f64, f64));
+
+/// Every crossing of the drawing.
+pub fn crossing_pairs(d: &Drawing) -> Result<Vec<CrossingPair>, String> {
+    let segs = segments(d)?;
+    let sizes: Vec<usize> = d.components.iter().map(|p| p.len()).collect();
+    Ok(intersections(&segs, &sizes)?
+        .iter()
+        .map(|h| (segs[h.i].id, segs[h.j].id, (h.at.0, -h.at.1)))
+        .collect())
 }
 
 fn mid(s: &Seg) -> (f64, f64) {

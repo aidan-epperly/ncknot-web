@@ -11,6 +11,9 @@ const $ = (id) => document.getElementById(id);
 let drawing = { components: [], over: [], boxes: [] }; // what the user edits
 let selectedBox = null; // index into drawing.boxes
 let selection = new Set(); // strands (segment ids) selected in twist-box mode
+let params = {}; // parameter values, e.g. { n: 3, m: 2 }
+let showStrands = false; // draw bundles as their parallel copies
+let computeAnalysis = null; // analysis of the expanded diagram (what the invariants use)
 let band = null; // rubber-band rectangle while selecting
 let showTwists = false;
 let pending = null; // vertices of a component being drawn
@@ -37,7 +40,7 @@ async function guarded(fn) {
 }
 
 function snapshot() {
-  return JSON.stringify({ drawing, pdSource });
+  return JSON.stringify({ drawing, pdSource, params });
 }
 function commit(fromTable = false) {
   if (!fromTable) $("library").value = "";
@@ -53,6 +56,8 @@ function restore(s) {
   analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = o.drawing;
   drawing.boxes = normBoxes(drawing.boxes);
+  if (o.params) params = o.params;
+  renderParams();
   pdSource = o.pdSource;
   selectedBox = null;
   for (const c of drawing.components) for (const v of c) idCounter = Math.max(idCounter, v.id + 1);
@@ -137,8 +142,8 @@ function changed() {
 
 function currentRequest(task, extra = {}) {
   if (pdSource) return { task, pd: pdSource.pd, free_loops: pdSource.free_loops, ...extra };
-  if (!analysis) return null;
-  return { task, pd: analysis.pd, free_loops: analysis.free_loops, ...extra };
+  if (!computeAnalysis) return null;
+  return { task, pd: computeAnalysis.pd, free_loops: computeAnalysis.free_loops, ...extra };
 }
 
 function requestBasic() {
@@ -164,31 +169,240 @@ function analyze() {
   const ids = new Set(drawing.components.flat().map((v) => v.id));
   drawing.boxes = drawing.boxes.filter((b) => b.segs.every((s) => ids.has(s)));
   if (selectedBox !== null && selectedBox >= drawing.boxes.length) selectedBox = null;
+  let shown;
+  let full;
+  try {
+    shown = concreteDrawing(false);
+    full = concreteDrawing(true);
+  } catch (e) {
+    analysis = computeAnalysis = null;
+    return e.message;
+  }
   let res;
   try {
-    res = knots.analyze(drawing);
+    res = knots.analyze(shown);
   } catch (e) {
     loadKnots().then((k) => (knots = k));
     res = { error: `internal error (${e})` };
   }
   if (res.error) {
-    analysis = null;
+    analysis = computeAnalysis = null;
     return res.error;
   }
   if (carryChoices(lastAnalysis, res)) {
     // re-analyse with the carried choices
+    shown.over = drawing.over;
+    full.over = drawing.over;
     try {
-      res = knots.analyze(drawing);
+      res = knots.analyze(shown);
     } catch (e) {
       res = { error: `internal error (${e})` };
     }
     if (res.error) {
-      analysis = null;
+      analysis = computeAnalysis = null;
       return res.error;
     }
   }
   analysis = lastAnalysis = res;
+  computeAnalysis = res;
+  if (needsExpansion()) {
+    let exp;
+    try {
+      exp = knots.analyze(full);
+    } catch (e) {
+      loadKnots().then((k) => (knots = k));
+      exp = { error: `internal error (${e})` };
+    }
+    computeAnalysis = exp.error ? null : exp;
+    if (exp.error) return exp.error;
+  }
   return null;
+}
+
+// ---------------------------------------------------------------- parameters, bundles
+
+/** Evaluates an integer expression in the parameters: + − * ( ), integers, names. */
+function evalExpr(text) {
+  const src = String(text).trim();
+  const tokens = src.match(/\d+|[A-Za-z_][A-Za-z_0-9]*|[-+*()]|\S/g) || [];
+  let i = 0;
+  const fail = (msg) => {
+    throw new Error(`"${src}": ${msg}`);
+  };
+  const factor = () => {
+    const t = tokens[i++];
+    if (t === undefined) fail("incomplete expression");
+    if (t === "-") return -factor();
+    if (t === "(") {
+      const v = sum();
+      if (tokens[i++] !== ")") fail("missing )");
+      return v;
+    }
+    if (/^\d+$/.test(t)) return Number(t);
+    if (/^[A-Za-z_]/.test(t)) {
+      if (!(t in params)) fail(`unknown parameter ${t}`);
+      return params[t];
+    }
+    fail(`unexpected ${t}`);
+  };
+  const product = () => {
+    let v = factor();
+    while (tokens[i] === "*") {
+      i++;
+      v *= factor();
+    }
+    return v;
+  };
+  const sum = () => {
+    let v = product();
+    while (tokens[i] === "+" || tokens[i] === "-") v = tokens[i++] === "+" ? v + product() : v - product();
+    return v;
+  };
+  if (!tokens.length) fail("empty");
+  const v = sum();
+  if (i < tokens.length) fail(`unexpected ${tokens[i]}`);
+  return v;
+}
+
+const multExpr = (c) => (drawing.mult && drawing.mult[c]) || "1";
+const boxCount = (b) => (b.expr ? evalExpr(b.expr) : b.n);
+
+function needsExpansion() {
+  return drawing.components.some((_, c) => multExpr(c) !== "1") || drawing.boxes.some((b) => b.segs.length < 2);
+}
+
+/** The drawing with numbers for every expression: the drawn diagram (bundles
+ *  as single strands, boxes on one drawn strand left out) or, with `full`,
+ *  everything including multiplicities. */
+function concreteDrawing(full) {
+  const boxes = drawing.boxes
+    .filter((b) => full || b.segs.length >= 2)
+    .map((b) => ({ segs: b.segs, n: boxCount(b) }));
+  const d = { components: drawing.components, over: drawing.over, boxes };
+  if (full) {
+    d.mult = drawing.components.map((_, c) => {
+      const k = evalExpr(multExpr(c));
+      if (!Number.isInteger(k) || k < 0 || k > 64) throw new Error(`multiplicity ${multExpr(c)} = ${k} is not between 0 and 64`);
+      return k;
+    });
+  }
+  return d;
+}
+
+function renderParams() {
+  const box = $("params");
+  box.replaceChildren();
+  for (const name of Object.keys(params)) {
+    const row = document.createElement("span");
+    row.className = "param";
+    row.innerHTML = `<i>${escapeHTML(name)}</i> = <input type="number" step="1" value="${params[name]}"><button title="decrease">−</button><button title="increase">+</button><button title="remove">×</button>`;
+    const [input, minus, plus, remove] = row.querySelectorAll("input, button");
+    const set = (v) => {
+      if (!Number.isInteger(v)) return;
+      params[name] = v;
+      input.value = v;
+      saveLocal();
+      changed();
+    };
+    input.onchange = () => set(Number(input.value));
+    minus.onclick = () => set(params[name] - 1);
+    plus.onclick = () => set(params[name] + 1);
+    remove.onclick = () => {
+      delete params[name];
+      renderParams();
+      saveLocal();
+      changed();
+    };
+    box.appendChild(row);
+  }
+  renderSweepRanges();
+}
+
+function renderSweepRanges() {
+  const names = Object.keys(params);
+  $("sweep-card").hidden = names.length === 0;
+  const box = $("sweep-ranges");
+  const old = {};
+  box.querySelectorAll("label").forEach((l) => (old[l.dataset.name] = [l.children[1].value, l.children[2].value]));
+  box.replaceChildren();
+  for (const name of names) {
+    const l = document.createElement("label");
+    l.dataset.name = name;
+    const [a, b] = old[name] || [params[name], params[name] + 3];
+    l.innerHTML = `<i>${escapeHTML(name)}</i><input type="number" step="1" value="${a}" aria-label="${escapeHTML(name)} from"><input type="number" step="1" value="${b}" aria-label="${escapeHTML(name)} to">`;
+    box.appendChild(l);
+  }
+}
+
+$("param-add").onclick = () => {
+  const name = $("param-name").value.trim();
+  if (!/^[A-Za-z_][A-Za-z_0-9]*$/.test(name)) return flash("A parameter name is a letter followed by letters or digits.");
+  if (!(name in params)) params[name] = 1;
+  $("param-name").value = "";
+  renderParams();
+  saveLocal();
+  changed();
+};
+$("param-name").addEventListener("keydown", (e) => e.key === "Enter" && $("param-add").onclick());
+$("show-strands").onchange = () => {
+  showStrands = $("show-strands").checked;
+  render();
+};
+
+$("sweep-go").onclick = () => {
+  const names = Object.keys(params);
+  const ranges = names.map((name) => {
+    const l = $("sweep-ranges").querySelector(`label[data-name="${name}"]`);
+    let lo = Number(l.children[1].value);
+    let hi = Number(l.children[2].value);
+    if (lo > hi) [lo, hi] = [hi, lo];
+    return [name, lo, hi];
+  });
+  if (ranges.some(([, lo, hi]) => !Number.isInteger(lo) || !Number.isInteger(hi))) return;
+  // every combination, at most 60
+  let combos = [{}];
+  for (const [name, lo, hi] of ranges) {
+    const next = [];
+    for (const c of combos) for (let v = lo; v <= hi; v++) next.push({ ...c, [name]: v });
+    combos = next;
+  }
+  if (combos.length > 60) return flash(`${combos.length} combinations; narrow the ranges to at most 60.`);
+  const saved = params;
+  const items = combos.map((c) => {
+    params = c;
+    const label = names.map((n) => `${n}=${c[n]}`).join(", ");
+    try {
+      const a = knots.analyze(concreteDrawing(true));
+      return a.error ? { label, pd: [], free_loops: 1, note: a.error } : { label, pd: a.pd, free_loops: a.free_loops };
+    } catch (e) {
+      return { label, pd: [], free_loops: 1, note: e.message };
+    }
+  });
+  params = saved;
+  $("sweep-status").textContent = `computing ${items.length} diagrams…`;
+  $("sweep").innerHTML = "";
+  runHeavy({ task: "family", items }, (res) => {
+    if (res.canceled) return ($("sweep-status").textContent = "canceled");
+    if (res.error) return ($("sweep-status").innerHTML = `<span class="err">${escapeHTML(res.error)}</span>`);
+    $("sweep-status").textContent = "";
+    $("sweep").innerHTML = familyTable(res, names.join(", "));
+  }, $("sweep-cancel"));
+};
+
+/** The table of a family computation (one row per member). */
+function familyTable(res, header) {
+  let html = `<table class="fam"><tr><th>${escapeHTML(header)}</th><th>crossings</th><th>det</th><th>σ</th><th>Δ(t)</th><th>V(t)</th><th>matches</th></tr>`;
+  for (const r of res) {
+    if (r.error) {
+      html += `<tr><td>${escapeHTML(r.label)}</td><td colspan="6" class="err">${escapeHTML(r.error)}</td></tr>`;
+      continue;
+    }
+    const what = r.components > 1 ? ` <span class="note">(${r.components} comp.)</span>` : "";
+    html += `<tr><td>${escapeHTML(r.label)}</td><td>${r.crossings}${what}</td><td>${r.determinant}</td>` +
+      `<td>${r.signature === null ? "—" : fmtInt(r.signature)}</td><td class="poly">${polyHTML(r.alexander)}</td>` +
+      `<td class="poly">${polyHTML(r.jones)}</td><td>${tableMatch(r.jones.text, r.alexander.text, r.components)}</td></tr>`;
+  }
+  return html + "</table>";
 }
 
 // A crossing's over/under choice is stored per pair of segments.  When an
@@ -267,11 +481,16 @@ function render() {
   } else banner.hidden = true;
 
   const segs = segmentById();
+  if (showStrands && needsExpansion() && !pdSource && !err) {
+    renderStrands();
+    return;
+  }
   drawing.components.forEach((poly, c) => {
     const color = COLORS[c % COLORS.length];
+    const bundled = multExpr(c) !== "1";
     el("polygon", {
       points: poly.map((v) => `${v.x},${v.y}`).join(" "),
-      class: "strand",
+      class: bundled ? "strand bundle" : "strand",
       stroke: color,
     });
     // orientation arrow on the longest segment
@@ -285,6 +504,19 @@ function render() {
     const a = poly[best];
     const b = poly[(best + 1) % poly.length];
     arrow(a, b, color);
+    if (bundled) {
+      // the multiplicity next to the arrow, on the strand's left
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const off = 16 / zoom();
+      const t = el("text", {
+        x: (a.x + b.x) / 2 + ((b.y - a.y) / len) * off,
+        y: (a.y + b.y) / 2 - ((b.x - a.x) / len) * off,
+        class: "mlabel",
+        "font-size": 15 / zoom(),
+        fill: color,
+      });
+      t.textContent = multExpr(c);
+    }
   });
   // over-strands on top: a halo, then the strand again, following the strand
   // through its vertices for a fixed length on both sides of the crossing
@@ -357,7 +589,11 @@ function render() {
 
 // Boxes from either format: { segs: [...], n } (older drawings: { a, b, n }).
 function normBoxes(list) {
-  return (list || []).map((b) => ({ segs: b.segs && b.segs.length ? b.segs : [b.a, b.b], n: b.n }));
+  return (list || []).map((b) => {
+    const nb = { segs: b.segs && b.segs.length ? b.segs : [b.a, b.b], n: b.n };
+    if (b.expr) nb.expr = b.expr;
+    return nb;
+  });
 }
 
 // a twist box: a rectangle across the midpoints of its strands, with the
@@ -367,7 +603,7 @@ function normBoxes(list) {
 // over (as in Rust).
 function boxFrame(b, segs) {
   const ss = b.segs.map((id) => segs.get(id));
-  if (ss.length < 2 || ss.some((s) => !s)) return null;
+  if (!ss.length || ss.some((s) => !s)) return null;
   const mid = (s) => ({ x: (s.p.x + s.q.x) / 2, y: (s.p.y + s.q.y) / 2 });
   const mids = ss.map(mid);
   const ux = ss[0].q.x - ss[0].p.x;
@@ -394,7 +630,8 @@ function drawBox(b, i, segs) {
   for (let m = k - 1; m >= 1; m--) for (let i = 0; i < m; i++) delta.push(i);
   const word = [];
   for (let t = 0; t < Math.abs(b.n); t++) word.push(...delta);
-  const pad = 10 / z;
+  // a box on one bundle strand spans the drawn bundle
+  const pad = (k === 1 ? 14 : 10) / z;
   const lMax = Math.max(...f.offs) + pad;
   const lMin = Math.min(...f.offs) - pad;
   const minLen = Math.min(...f.ss.map((s) => Math.hypot(s.q.x - s.p.x, s.q.y - s.p.y)));
@@ -410,7 +647,7 @@ function drawBox(b, i, segs) {
   });
   r.dataset.box = i;
   el("title", {}, r).textContent = `twist box: ${b.n} half-twists of ${k} strands`;
-  if (showTwists && word.length > 0) {
+  if (showTwists && word.length > 0 && k > 1) {
     const lpos = f.order.map((i) => f.offs[i]); // left to right
     const colors = f.order.map((i) => COLORS[f.ss[i].c % COLORS.length]);
     const line = (seg, cls, color) => {
@@ -445,14 +682,17 @@ function updateBoxPanel() {
   $("hint").classList.toggle("with-panel", !!b);
   $("family-card").hidden = !b;
   if (!b) return;
-  if (document.activeElement !== $("box-n")) $("box-n").value = b.n;
-  $("box-title").textContent = `Twist box (${b.segs.length} strands)`;
+  if (document.activeElement !== $("box-n")) $("box-n").value = b.expr || b.n;
+  $("box-minus").disabled = $("box-plus").disabled = !!b.expr;
+  $("family-card").hidden = !!b.expr;
+  $("box-title").textContent = b.segs.length > 1 ? `Twist box (${b.segs.length} strands)` : "Twist box (bundle)";
   $("box-show").checked = showTwists;
 }
 
 function setBoxN(n) {
   const b = drawing.boxes[selectedBox];
   if (!b || !Number.isInteger(n)) return;
+  delete b.expr;
   b.n = Math.max(-60, Math.min(60, n));
   commit();
   changed();
@@ -476,8 +716,9 @@ function updateSelectionPanel() {
   $("sel-panel").hidden = !show;
   if (!show) return;
   $("sel-count").textContent = `${selection.size} strand${selection.size === 1 ? "" : "s"} selected`;
+  const bundled = [...selection].some((id) => drawing.components.some((poly, c) => multExpr(c) !== "1" && poly.some((v) => v.id === id)));
   $("sel-parallel").disabled = selection.size < 2;
-  $("sel-box").disabled = selection.size < 2;
+  $("sel-box").disabled = selection.size < 2 && !bundled;
 }
 
 const inSomeBox = (id) => drawing.boxes.some((b) => b.segs.includes(id));
@@ -531,7 +772,7 @@ function makeParallel() {
 
 function addTwistBox() {
   const ids = [...selection];
-  if (ids.length < 2) return;
+  if (!ids.length) return;
   if (ids.some(inSomeBox)) return flash("A selected strand already carries a twist box.");
   drawing.boxes.push({ segs: ids, n: 1 });
   selection.clear();
@@ -542,6 +783,23 @@ function addTwistBox() {
 }
 
 $("sel-parallel").onclick = makeParallel;
+$("sel-bundle").onclick = () => {
+  const comps = new Set();
+  drawing.components.forEach((poly, c) => poly.forEach((v) => selection.has(v.id) && comps.add(c)));
+  if (!comps.size) return;
+  const first = [...comps][0];
+  const text = prompt("Multiplicity of the selected components (a number or an expression such as n or n+1):", multExpr(first));
+  if (text === null) return;
+  try {
+    evalExpr(text);
+  } catch (e) {
+    return flash(e.message);
+  }
+  drawing.mult = drawing.components.map((_, c) => multExpr(c));
+  for (const c of comps) drawing.mult[c] = text.trim() || "1";
+  commit();
+  changed();
+};
 $("sel-box").onclick = addTwistBox;
 $("sel-clear").onclick = () => {
   selection.clear();
@@ -561,6 +819,42 @@ function nearestSegment(p) {
     }),
   );
   return best && best.d < 12 / zoom() ? best.id : null;
+}
+
+/** The bundles drawn as their parallel copies (read-only view). */
+function renderStrands() {
+  let dr;
+  let an;
+  try {
+    const res = knots.expand({ drawing: concreteDrawing(true), spacing: 7 / zoom() });
+    if (res.error) throw new Error(res.error);
+    dr = res.drawing;
+    an = knots.analyze({ components: dr.components, over: dr.over, boxes: dr.boxes });
+    if (an.error) throw new Error(an.error);
+  } catch (e) {
+    $("banner").hidden = false;
+    $("banner").textContent = `Cannot show the strands: ${e.message}`;
+    return;
+  }
+  const segs = new Map();
+  dr.components.forEach((poly, c) =>
+    poly.forEach((v, k) => segs.set(v.id, { c, p: v, q: poly[(k + 1) % poly.length] })),
+  );
+  dr.components.forEach((poly, c) =>
+    el("polygon", { points: poly.map((v) => `${v.x},${v.y}`).join(" "), class: "strand thin", stroke: COLORS[c % COLORS.length] }),
+  );
+  const index = new Map();
+  dr.components.forEach((poly, c) => poly.forEach((v, k) => index.set(v.id, [c, k])));
+  for (const x of an.crossings) {
+    const at = index.get(x.over);
+    if (!at) continue;
+    const pts = overPath(dr.components[at[0]], at[1], x, 5 / zoom());
+    const points = pts.map((p) => `${p.x},${p.y}`).join(" ");
+    el("polyline", { points, class: "halo thin" });
+    el("polyline", { points, class: "strand thin", stroke: COLORS[at[0] % COLORS.length] });
+  }
+  dr.boxes.forEach((b, i) => drawBox(b, -1 - i, segs));
+  $("hint").textContent = "Showing every strand of the bundles (read-only). Untick “show strands” to edit.";
 }
 
 // The piece of the strand within arc length L of the point x on segment k.
@@ -627,6 +921,7 @@ function setMode(m) {
 function closePending() {
   if (!pending || pending.points.length < 3) return;
   drawing.components.push(pending.points.map((p) => ({ id: nextId(), x: p.x, y: p.y })));
+  if (drawing.mult) drawing.mult.push("1");
   pdSource = null;
   pending = { points: [], cursor: null };
   commit();
@@ -749,7 +1044,10 @@ svg.addEventListener("contextmenu", (e) => {
 function deleteVertex(id) {
   const c = drawing.components.findIndex((poly) => poly.some((v) => v.id === id));
   if (c < 0) return;
-  if (drawing.components[c].length <= 3) drawing.components.splice(c, 1);
+  if (drawing.components[c].length <= 3) {
+    drawing.components.splice(c, 1);
+    if (drawing.mult) drawing.mult.splice(c, 1);
+  }
   else drawing.components[c] = drawing.components[c].filter((v) => v.id !== id);
   commit();
   changed();
@@ -814,7 +1112,19 @@ function removeBox() {
 }
 $("box-minus").onclick = () => setBoxN(drawing.boxes[selectedBox].n - 1);
 $("box-plus").onclick = () => setBoxN(drawing.boxes[selectedBox].n + 1);
-$("box-n").onchange = () => setBoxN(Number($("box-n").value));
+$("box-n").onchange = () => {
+  const text = $("box-n").value.trim();
+  if (/^-?\d+$/.test(text)) return setBoxN(Number(text));
+  const b = drawing.boxes[selectedBox];
+  try {
+    evalExpr(text);
+  } catch (e) {
+    return flash(e.message);
+  }
+  b.expr = text;
+  commit();
+  changed();
+};
 $("box-delete").onclick = removeBox;
 $("box-show").onchange = () => {
   showTwists = $("box-show").checked;
@@ -1188,7 +1498,16 @@ $("fam-go").onclick = () => {
   for (let n = lo; n <= hi; n++) {
     const d = JSON.parse(JSON.stringify(drawing));
     d.boxes[selectedBox].n = n;
-    const a = knots.analyze(d);
+    delete d.boxes[selectedBox].expr;
+    let a;
+    try {
+      const saved = drawing;
+      drawing = d;
+      a = knots.analyze(concreteDrawing(true));
+      drawing = saved;
+    } catch (e) {
+      a = { error: e.message };
+    }
     items.push(a.error ? { label: String(n), pd: [], free_loops: 1 } : { label: String(n), pd: a.pd, free_loops: a.free_loops });
   }
   $("fam-status").textContent = `computing ${items.length} diagrams…`;
@@ -1197,18 +1516,7 @@ $("fam-go").onclick = () => {
     if (res.canceled) return ($("fam-status").textContent = "canceled");
     if (res.error) return ($("fam-status").innerHTML = `<span class="err">${escapeHTML(res.error)}</span>`);
     $("fam-status").textContent = "";
-    let html = `<table class="fam"><tr><th>n</th><th>crossings</th><th>det</th><th>σ</th><th>Δ(t)</th><th>V(t)</th><th>matches</th></tr>`;
-    for (const r of res) {
-      if (r.error) {
-        html += `<tr><td>${fmtInt(Number(r.label))}</td><td colspan="6" class="err">${escapeHTML(r.error)}</td></tr>`;
-        continue;
-      }
-      const what = r.components > 1 ? ` <span class="note">(${r.components} comp.)</span>` : "";
-      html += `<tr><td>${fmtInt(Number(r.label))}</td><td>${r.crossings}${what}</td><td>${r.determinant}</td>` +
-        `<td>${r.signature === null ? "—" : fmtInt(r.signature)}</td><td class="poly">${polyHTML(r.alexander)}</td>` +
-        `<td class="poly">${polyHTML(r.jones)}</td><td>${tableMatch(r.jones.text, r.alexander.text, r.components)}</td></tr>`;
-    }
-    $("family").innerHTML = html + "</table>";
+    $("family").innerHTML = familyTable(res, "n");
   }, $("fam-cancel"));
 };
 
@@ -1220,7 +1528,9 @@ function encodeState() {
   const compact = {
     c: drawing.components.map((poly) => poly.map((v) => [v.id, Math.round(v.x), Math.round(v.y)])),
     o: drawing.over,
-    b: drawing.boxes.map((b) => ({ s: b.segs, n: b.n })),
+    b: drawing.boxes.map((b) => (b.expr ? { s: b.segs, n: b.n, e: b.expr } : { s: b.segs, n: b.n })),
+    u: drawing.mult,
+    p: params,
   };
   return btoa(JSON.stringify(compact)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -1229,7 +1539,11 @@ function decodeState(s) {
   return {
     components: o.c.map((poly) => poly.map(([id, x, y]) => ({ id, x, y }))),
     over: o.o || [],
-    boxes: (o.b || []).map((x) => (Array.isArray(x) ? { segs: [x[0], x[1]], n: x[2] } : { segs: x.s, n: x.n })),
+    boxes: (o.b || []).map((x) =>
+      Array.isArray(x) ? { segs: [x[0], x[1]], n: x[2] } : x.e ? { segs: x.s, n: x.n, expr: x.e } : { segs: x.s, n: x.n },
+    ),
+    mult: o.u,
+    params: o.p,
   };
 }
 function saveLocal() {
@@ -1274,6 +1588,9 @@ async function main() {
     if (hash) {
       analysis = lastAnalysis = null; // a new drawing: no choices to carry over
       drawing = decodeState(hash[1]);
+      if (drawing.params) params = drawing.params;
+      delete drawing.params;
+      renderParams();
       lastCommitted = snapshot();
       fitView();
     } else if (saved) restore(saved);

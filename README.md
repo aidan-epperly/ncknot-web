@@ -59,6 +59,19 @@ The build needs Rust's `wasm32-unknown-unknown` target
     strands.
   - With a box selected, **Twist family** computes the determinant, signature,
     Alexander and Jones polynomials and table matches for a range of n.
+- **Parameters and bundles** (for infinite families):
+  - Add named integer **parameters** (`n`, `m`, …) and step them with − / +.
+  - A **bundle** is a component drawn once that stands for several parallel
+    copies (blackboard framing). Select one of its strands in the Twist box
+    tool and press **Bundle…** to give it a multiplicity such as `n` or `n+1`;
+    `0` removes it. A bundle that turns around gives nested arcs 1, 2, …, n.
+  - Where an a-bundle crosses a b-bundle, the copies cross in an a×b grid with
+    the drawn over/under choice. A twist box on bundle strands twists all their
+    copies (Δⁿ on the total width); a box may sit on a single bundle strand.
+  - Twist box counts accept **expressions** such as `m` or `2*m+1`.
+  - **Show strands** draws every copy (read-only), to check the expansion.
+  - **Parameter sweep** computes the invariants over a grid of parameter
+    values (at most 60 combinations).
 - **Braids and the knot table:**
   - press the σᵢ / σᵢ⁻¹ buttons or type a word (`1 -2 1 -2`) to draw a braid
     closure;
@@ -134,6 +147,7 @@ src/geometry.rs   drawing → crossings, signs, PD code; alternating choices
 src/api.rs        JSON requests → ncknot invariants, families; the knot table
 src/layout.rs     PD code → drawing (Tutte embedding of a triangulation)
 src/relax.rs      crossing-preserving relaxation, simplification, fitting
+src/bundle.rs     bundles: parallel copies of components, crossing grids
 src/lib.rs        the four exports
 www/              index.html, style.css, app.js (editor, panels), braid.js
                   (braid closures as drawings), knot.js (wasm loader), worker.js
@@ -142,7 +156,7 @@ tests/geometry.rs native tests: pentagram = 5_1 when alternating, Hopf
 tests/twist_boxes.rs  boxes against integer tangle closures (T(2,n), unknot) and
                   k-strand boxes against braid closures of Δⁿ
 tests/layout.rs   layouts round-trip: table knots, random braids, split links
-tests/browser/    smoke.py, features.py, drag.py, bundle.py: Playwright (Edge) end-to-end checks
+tests/browser/    smoke.py, features.py, drag.py, bundle.py, params.py: Playwright (Edge) end-to-end checks
 build.py          build and serve
 ```
 
@@ -155,6 +169,7 @@ python tests/browser/smoke.py http://localhost:8765/ target/screenshots
 python tests/browser/features.py http://localhost:8765/ target/screenshots
 python tests/browser/drag.py http://localhost:8765/ target/screenshots
 python tests/browser/bundle.py http://localhost:8765/ target/screenshots
+python tests/browser/params.py http://localhost:8765/ target/screenshots
 ```
 
 The browser test runs in Edge and checks:

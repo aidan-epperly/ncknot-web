@@ -34,6 +34,7 @@ fn pentagram_is_an_unknot_or_cinquefoil() {
     let mut d = Drawing {
         components: vec![pentagram()],
         over: vec![],
+        mult: Vec::new(),
         boxes: vec![],
     };
     let (a, k) = analyze(&d).unwrap();
@@ -65,6 +66,7 @@ fn signs_follow_the_screen() {
     let mut d = Drawing {
         components: vec![a, b],
         over: vec![],
+        mult: Vec::new(),
         boxes: vec![],
     };
     let (an, k) = analyze(&d).unwrap();
@@ -107,12 +109,14 @@ fn degenerate_drawings_are_reported() {
     let d = Drawing {
         components: vec![tri.clone(), touch],
         over: vec![],
+        mult: Vec::new(),
         boxes: vec![],
     };
     assert!(analyze(&d).is_err());
     let d = Drawing {
         components: vec![polygon(0, &[(0.0, 0.0), (1.0, 0.0)])],
         over: vec![],
+        mult: Vec::new(),
         boxes: vec![],
     };
     assert!(analyze(&d).is_err());
@@ -120,6 +124,7 @@ fn degenerate_drawings_are_reported() {
     let d = Drawing {
         components: vec![tri],
         over: vec![],
+        mult: Vec::new(),
         boxes: vec![],
     };
     assert_eq!(diagram(&d).jones(), Diagram::unknot().jones());

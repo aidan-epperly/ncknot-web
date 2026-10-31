@@ -48,18 +48,32 @@
         <div id="sel-panel" class="box-panel sel-panel" hidden>
           <span class="box-title" id="sel-count"></span>
           <button id="sel-parallel" title="Give the selected strands a parallel, evenly spaced middle section">Make parallel</button>
+          <button id="sel-bundle" title="Make the selected strands' components bundles of parallel copies (multiplicity such as n or n+1)">Bundle…</button>
           <button id="sel-box" title="Put a twist box on the selected strands">Add twist box</button>
           <button id="sel-clear" title="Clear the selection (Esc)">Clear</button>
         </div>
         <div id="box-panel" class="box-panel" hidden>
           <span class="box-title" id="box-title">Twist box</span>
           <button id="box-minus" title="One half-twist less (−)">−</button>
-          <input id="box-n" type="number" step="1" aria-label="Half-twists">
+          <input id="box-n" type="text" spellcheck="false" aria-label="Half-twists (a number or an expression such as m)">
           <button id="box-plus" title="One half-twist more (+)">+</button>
           <label title="Draw the crossings instead of the number"><input type="checkbox" id="box-show"> show twists</label>
           <button id="box-delete" title="Remove the box (Delete)">Remove</button>
         </div>
       </div>
+
+      <details class="builder" open id="params-box">
+        <summary>Parameters and bundles</summary>
+        <div class="builder-body">
+          <div id="params" class="params"></div>
+          <div class="row">
+            <input id="param-name" type="text" size="5" spellcheck="false" placeholder="name" aria-label="New parameter name">
+            <button id="param-add">Add parameter</button>
+            <label title="Draw every bundle as its parallel copies"><input type="checkbox" id="show-strands"> show strands</label>
+          </div>
+          <p class="note">A bundle stands for parallel copies of a component: select strands in the Twist box tool and press Bundle… to give their components a multiplicity such as <code>n</code> or <code>n+1</code>. Twist box counts accept expressions such as <code>m</code> or <code>2*m+1</code>.</p>
+        </div>
+      </details>
 
       <details class="builder" open>
         <summary>Braids and the knot table</summary>
@@ -127,6 +141,17 @@
       <div class="card" id="linking-card">
         <h2>Linking numbers</h2>
         <div id="linking"></div>
+      </div>
+
+      <div class="card" id="sweep-card" hidden>
+        <h2>Parameter sweep <span class="note">invariants over a grid of parameter values</span></h2>
+        <div class="row" id="sweep-ranges"></div>
+        <div class="row">
+          <button id="sweep-go">Compute</button>
+          <button id="sweep-cancel" hidden>Cancel</button>
+          <span id="sweep-status" class="note"></span>
+        </div>
+        <div id="sweep" class="khovanov"></div>
       </div>
 
       <div class="card" id="family-card" hidden>

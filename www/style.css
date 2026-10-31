@@ -160,6 +160,16 @@ footer { padding: 6px 20px 16px; color: var(--muted); font-size: 0.8rem; }
 }
 [hidden] { display: none !important; }
 .sel-panel { top: 10px; bottom: auto; }
+.params { display: flex; flex-wrap: wrap; gap: 6px 14px; flex-basis: 100%; }
+.param { display: flex; align-items: center; gap: 4px; font-family: "Cambria Math", Georgia, serif; }
+.param input { width: 4.2em; }
+.param button { min-width: 28px; padding: 2px 6px; }
+.mlabel { font-weight: 600; text-anchor: middle; dominant-baseline: central; pointer-events: none; paint-order: stroke; stroke: #fbfcfd; stroke-width: 4px; font-family: "Cambria Math", Georgia, serif; }
+.strand.bundle { stroke-width: 6.5; }
+.strand.thin { stroke-width: 2; }
+.halo.thin { stroke-width: 5.5; }
+#sweep-ranges label { display: flex; align-items: center; gap: 4px; }
+#sweep-ranges input { width: 4.2em; }
 .band { fill: rgba(47, 95, 208, 0.08); stroke: var(--accent); stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
 .box-panel .box-title { font-weight: 600; margin-right: 2px; }
 .box-panel input[type="number"] { width: 4.2em; }
