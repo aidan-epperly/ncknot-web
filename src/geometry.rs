@@ -36,16 +36,42 @@ pub struct Drawing {
     pub boxes: Vec<TwistBox>,
 }
 
-/// `n` half-twists between segments `a` and `b` (ids of their first
-/// vertices), placed at the segments' midpoints; see [`analyze`].
-#[derive(Clone, Debug, Deserialize, Serialize)]
+/// `n` half-twists of a bundle of two or more strands (segments, named by
+/// the ids of their first vertices), placed at the segments' midpoints; see
+/// [`analyze`].  Older drawings name two strands as `a` and `b`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TwistBox {
-    /// One strand.
-    pub a: u32,
-    /// The other strand.
-    pub b: u32,
-    /// Number of half-twists (sign = handedness).
+    /// The strands.
+    #[serde(default)]
+    pub segs: Vec<u32>,
+    /// First strand of a two-strand box (older format).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a: Option<u32>,
+    /// Second strand of a two-strand box (older format).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub b: Option<u32>,
+    /// Number of half-twists of the bundle (sign = handedness).
     pub n: i64,
+}
+
+impl TwistBox {
+    /// A box on these strands.
+    pub fn new(segs: &[u32], n: i64) -> Self {
+        TwistBox {
+            segs: segs.to_vec(),
+            n,
+            ..Default::default()
+        }
+    }
+
+    /// The strands, in either format.
+    pub fn strands(&self) -> Vec<u32> {
+        if self.segs.is_empty() {
+            self.a.into_iter().chain(self.b).collect()
+        } else {
+            self.segs.clone()
+        }
+    }
 }
 
 /// One crossing of the drawing.
@@ -218,25 +244,45 @@ pub fn analyze(d: &Drawing) -> Result<(Analysis, Diagram), String> {
     let hits = intersections(&segs, &sizes)?;
     let chosen = over_choice(&d.over);
     let seg_of: HashMap<u32, usize> = segs.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
-    // twist boxes with n ≠ 0
-    let mut boxes: Vec<(usize, usize, i64)> = Vec::new();
+    // twist boxes with n ≠ 0: strands ordered left to right looking along the
+    // first one, with that direction
+    let mut boxes: Vec<(Vec<usize>, i64, (f64, f64))> = Vec::new();
     let mut used = HashSet::new();
     for tb in d.boxes.iter().filter(|b| b.n != 0) {
-        let (Some(&i), Some(&j)) = (seg_of.get(&tb.a), seg_of.get(&tb.b)) else {
-            return Err("a twist box refers to a strand that no longer exists".into());
+        let ids = tb.strands();
+        if ids.len() < 2 {
+            return Err("a twist box needs at least two strands".into());
+        }
+        let mut idx = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let Some(&i) = seg_of.get(id) else {
+                return Err("a twist box refers to a strand that no longer exists".into());
+            };
+            if !used.insert(i) {
+                return Err("a strand can be in only one twist box, once".into());
+            }
+            idx.push(i);
+        }
+        let u = sub(segs[idx[0]].q, segs[idx[0]].p);
+        let left = (-u.1, u.0);
+        let m0 = mid(&segs[idx[0]]);
+        let offset = |i: usize| {
+            let m = sub(mid(&segs[i]), m0);
+            m.0 * left.0 + m.1 * left.1
         };
-        if i == j || !used.insert(i) || !used.insert(j) {
-            return Err("a twist box needs two different strands, each in at most one box".into());
+        idx.sort_by(|&x, &y| offset(y).partial_cmp(&offset(x)).unwrap());
+        // nothing may pass between neighbouring strands of the bundle
+        for w in idx.windows(2) {
+            let (p, q) = (mid(&segs[w[0]]), mid(&segs[w[1]]));
+            if segs
+                .iter()
+                .enumerate()
+                .any(|(k, s)| k != w[0] && k != w[1] && meets(p, q, s.p, s.q))
+            {
+                return Err("a strand passes between the strands of a twist box".into());
+            }
         }
-        let (p, q) = (mid(&segs[i]), mid(&segs[j]));
-        if segs
-            .iter()
-            .enumerate()
-            .any(|(k, s)| k != i && k != j && meets(p, q, s.p, s.q))
-        {
-            return Err("a strand passes between the two strands of a twist box".into());
-        }
-        boxes.push((i, j, tb.n));
+        boxes.push((idx, tb.n, u));
     }
     // passages along each component: (k, t, through)
     let mut passages: Vec<Vec<(usize, f64, Through)>> = vec![Vec::new(); sizes.len()];
@@ -249,13 +295,14 @@ pub fn analyze(d: &Drawing) -> Result<(Analysis, Diagram), String> {
         passages[a.comp].push((a.k, h.t, Through::Crossing(c, over == a.id)));
         passages[b.comp].push((b.k, h.u, Through::Crossing(c, over == b.id)));
     }
-    for (bi, &(i, j, _)) in boxes.iter().enumerate() {
-        passages[segs[i].comp].push((segs[i].k, 0.5, Through::Box(bi, 0)));
-        passages[segs[j].comp].push((segs[j].k, 0.5, Through::Box(bi, 1)));
+    for (bi, (idx, _, _)) in boxes.iter().enumerate() {
+        for (pos, &i) in idx.iter().enumerate() {
+            passages[segs[i].comp].push((segs[i].k, 0.5, Through::Box(bi, pos)));
+        }
     }
     // edges: per component, edge j leaves passage j
     let mut at_crossing: Vec<[Option<Ends>; 2]> = vec![[None, None]; hits.len()];
-    let mut at_box: Vec<[Option<Ends>; 2]> = vec![[None, None]; boxes.len()];
+    let mut at_box: Vec<Vec<Option<Ends>>> = boxes.iter().map(|(idx, _, _)| vec![None; idx.len()]).collect();
     let mut base = 1i64;
     let mut free = 0;
     for (comp, list) in passages.iter_mut().enumerate() {
@@ -294,55 +341,76 @@ pub fn analyze(d: &Drawing) -> Result<(Analysis, Diagram), String> {
         hint.insert(oo, (c, if positive { 1 } else { 3 }));
     }
     let mut fresh = base;
-    for (bi, &(i, j, n)) in boxes.iter().enumerate() {
-        let (ai, ao, da) = at_box[bi][0].unwrap();
-        let (bin, bout, db) = at_box[bi][1].unwrap();
-        // local frame: up along segment a; is b on the right of a?
-        let b_right = cross(da, sub(mid(&segs[j]), mid(&segs[i]))) < 0.0;
-        let parallel = da.0 * db.0 + da.1 * db.1 > 0.0;
-        let (b_bottom, b_top) = if parallel { (bin, bout) } else { (bout, bin) };
-        // labels at the left and right positions, from the bottom up
-        let (mut left, mut right) = if b_right { (ai, b_bottom) } else { (b_bottom, ai) };
-        let (top_left, top_right) = if b_right { (ao, b_top) } else { (b_top, ao) };
-        let k = n.unsigned_abs();
-        // the drawn direction: where a's and b's outgoing edges leave the box
-        // (top or bottom, on their side); slots as in the tuples below
+    for (bi, (idx, n, u)) in boxes.iter().enumerate() {
+        let k = idx.len();
+        // per position (left to right): the edge at the bottom and the edge at
+        // the top of the box, looking along u
+        let mut bottom = Vec::with_capacity(k);
+        let mut top = Vec::with_capacity(k);
+        let mut along = Vec::with_capacity(k);
+        for slot in &at_box[bi] {
+            let (e_in, e_out, dir) = slot.expect("box passage");
+            let parallel = dir.0 * u.0 + dir.1 * u.1 > 0.0;
+            along.push(parallel);
+            if parallel {
+                bottom.push(e_in);
+                top.push(e_out);
+            } else {
+                bottom.push(e_out);
+                top.push(e_in);
+            }
+        }
+        // Δ^n, Δ = (σ_1 ⋯ σ_{k-1})(σ_1 ⋯ σ_{k-2}) ⋯ σ_1: positions of the generators
+        let delta: Vec<usize> = (1..k).rev().flat_map(|m| 0..m).collect();
         let first = code.len();
-        let last = first + k as usize - 1;
-        let top_slot = |left_side: bool| match (n > 0, left_side) {
-            (true, true) => 2,   // tl
-            (true, false) => 1,  // tr
-            (false, true) => 3,  // tl
-            (false, false) => 2, // tr
-        };
-        let bottom_slot = |left_side: bool| match (n > 0, left_side) {
-            (true, true) => 3,   // left
-            (true, false) => 0,  // right
-            (false, true) => 0,  // left
-            (false, false) => 1, // right
-        };
-        hint.entry(ao).or_insert((last, top_slot(b_right)));
-        let b_left = !b_right;
-        let b_hint = if parallel {
-            (last, top_slot(b_left))
-        } else {
-            (first, bottom_slot(b_left))
-        };
-        hint.entry(bout).or_insert(b_hint);
-        for level in 0..k {
-            let (tl, tr) = if level + 1 == k {
-                (top_left, top_right)
-            } else {
+        let mut cur = bottom.clone();
+        for _ in 0..n.unsigned_abs() {
+            for &i in &delta {
+                let (l, r) = (i, i + 1);
                 fresh += 2;
-                (fresh - 2, fresh - 1)
-            };
-            // corners: BR = right, TR = tr, TL = tl, BL = left; "/" is BL–TR
-            code.push(if n > 0 {
-                [right, tr, tl, left] // "/" over: the under-strand is BR–TL
+                let (tl, tr) = (fresh - 2, fresh - 1);
+                // corners: BR = cur[r], TR = tr, TL = tl, BL = cur[l]; "/" is BL–TR
+                code.push(if *n > 0 {
+                    [cur[r], tr, tl, cur[l]] // "/" over: the under-strand is BR–TL
+                } else {
+                    [cur[l], cur[r], tr, tl] // "\" over: the under-strand is BL–TR
+                });
+                cur[l] = tl;
+                cur[r] = tr;
+            }
+        }
+        // the edges leaving the top are the strands' continuations
+        let rename: HashMap<i64, i64> = cur.iter().copied().zip(top.iter().copied()).collect();
+        for x in &mut code[first..] {
+            for l in x.iter_mut() {
+                if let Some(&t) = rename.get(l) {
+                    *l = t;
+                }
+            }
+        }
+        // the drawn direction: where each strand's outgoing edge leaves the box
+        let (top_slots, bottom_slots): ([usize; 2], [usize; 2]) = if *n > 0 {
+            ([1, 2], [0, 3])
+        } else {
+            ([2, 3], [0, 1])
+        };
+        for pos in 0..k {
+            let (_, e_out, _) = at_box[bi][pos].unwrap();
+            let found = if along[pos] {
+                (first..code.len())
+                    .rev()
+                    .find_map(|c| top_slots.iter().find(|&&t| code[c][t] == e_out).map(|&t| (c, t)))
             } else {
-                [left, right, tr, tl] // "\" over: the under-strand is BL–TR
-            });
-            (left, right) = (tl, tr);
+                (first..code.len()).find_map(|c| {
+                    bottom_slots
+                        .iter()
+                        .find(|&&t| code[c][t] == e_out)
+                        .map(|&t| (c, t))
+                })
+            };
+            if let Some(h) = found {
+                hint.entry(e_out).or_insert(h);
+            }
         }
     }
     let code = orient(&code, &hint)?;

@@ -320,7 +320,7 @@ pub fn simplify(d: &mut Drawing, max_turn: f64) {
     // removed vertex → the vertex that now starts its segment
     let mut merged_into: HashMap<usize, usize> = HashMap::new();
     // segments carrying a twist box keep their ends (the box sits at the midpoint)
-    let boxed: HashSet<u32> = d.boxes.iter().flat_map(|b| [b.a, b.b]).collect();
+    let boxed: HashSet<u32> = d.boxes.iter().flat_map(|b| b.strands()).collect();
     let mut changed = true;
     while changed {
         changed = false;
@@ -406,8 +406,9 @@ fn write_back(d: &mut Drawing, net: &Net, merged_into: &HashMap<usize, usize>) {
         *o = [resolve(o[0]), resolve(o[1]), resolve(o[2])];
     }
     for b in &mut d.boxes {
-        b.a = resolve(b.a);
-        b.b = resolve(b.b);
+        b.segs = b.strands().into_iter().map(resolve).collect();
+        b.a = None;
+        b.b = None;
     }
 }
 

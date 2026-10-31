@@ -159,6 +159,8 @@ footer { padding: 6px 20px 16px; color: var(--muted); font-size: 0.8rem; }
   box-shadow: 0 2px 10px rgba(20, 30, 50, 0.08); font-size: 0.88rem;
 }
 [hidden] { display: none !important; }
+.sel-panel { top: 10px; bottom: auto; }
+.band { fill: rgba(47, 95, 208, 0.08); stroke: var(--accent); stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
 .box-panel .box-title { font-weight: 600; margin-right: 2px; }
 .box-panel input[type="number"] { width: 4.2em; }
 .box-panel label { display: flex; align-items: center; gap: 4px; color: var(--muted); }

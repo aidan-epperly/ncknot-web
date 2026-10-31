@@ -10,7 +10,8 @@ const $ = (id) => document.getElementById(id);
 
 let drawing = { components: [], over: [], boxes: [] }; // what the user edits
 let selectedBox = null; // index into drawing.boxes
-let twistPick = null; // first strand picked in twist-box mode
+let selection = new Set(); // strands (segment ids) selected in twist-box mode
+let band = null; // rubber-band rectangle while selecting
 let showTwists = false;
 let pending = null; // vertices of a component being drawn
 let mode = "edit";
@@ -51,7 +52,7 @@ function restore(s) {
   const o = JSON.parse(s);
   analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = o.drawing;
-  drawing.boxes ||= [];
+  drawing.boxes = normBoxes(drawing.boxes);
   pdSource = o.pdSource;
   selectedBox = null;
   for (const c of drawing.components) for (const v of c) idCounter = Math.max(idCounter, v.id + 1);
@@ -161,7 +162,7 @@ function analyze() {
     return null;
   }
   const ids = new Set(drawing.components.flat().map((v) => v.id));
-  drawing.boxes = drawing.boxes.filter((b) => ids.has(b.a) && ids.has(b.b));
+  drawing.boxes = drawing.boxes.filter((b) => b.segs.every((s) => ids.has(s)));
   if (selectedBox !== null && selectedBox >= drawing.boxes.length) selectedBox = null;
   let res;
   try {
@@ -301,10 +302,16 @@ function render() {
     }
   }
   drawing.boxes.forEach((b, i) => drawBox(b, i, segs));
-  if (twistPick !== null && segs.get(twistPick)) {
-    const s = segs.get(twistPick);
-    el("line", { x1: s.p.x, y1: s.p.y, x2: s.q.x, y2: s.q.y, class: "pick" });
+  for (const id of selection) {
+    const s = segs.get(id);
+    if (s) el("line", { x1: s.p.x, y1: s.p.y, x2: s.q.x, y2: s.q.y, class: "pick" });
   }
+  if (band) {
+    const [x0, x1] = [Math.min(band.a.x, band.b.x), Math.max(band.a.x, band.b.x)];
+    const [y0, y1] = [Math.min(band.a.y, band.b.y), Math.max(band.a.y, band.b.y)];
+    el("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "band" });
+  }
+  updateSelectionPanel();
   updateBoxPanel();
   if (mode === "edit") {
     if (analysis) {
@@ -344,69 +351,87 @@ function render() {
     mode === "draw"
       ? "Draw: click to place vertices; click the first vertex (or press Enter) to close the component. Esc cancels."
       : mode === "twist"
-        ? "Twist box: click two neighboring strands (no strand between them). The box sits at their midpoints; + and − change the twists."
+        ? "Twist box: click strands to select them (or drag a rectangle). Make parallel lines them up; Add twist box puts n half-twists on the bundle. Esc clears."
         : "Edit: drag vertices · click a crossing to flip it · click a box to change it · double-click a strand to add a vertex · Alt-click a vertex to delete it.";
 }
 
-// a twist box: a rectangle across the midpoints of its two strands, with
-// the number of half-twists or the twists themselves.  Looking along strand
-// a, the strand coming from the left passes over when n > 0 (as in Rust).
+// Boxes from either format: { segs: [...], n } (older drawings: { a, b, n }).
+function normBoxes(list) {
+  return (list || []).map((b) => ({ segs: b.segs && b.segs.length ? b.segs : [b.a, b.b], n: b.n }));
+}
+
+// a twist box: a rectangle across the midpoints of its strands, with the
+// number of half-twists of the bundle or the twists themselves.  Looking
+// along the first strand, the strands are ordered left to right; a positive
+// half-twist is the braid Δ in which the left strand of each crossing passes
+// over (as in Rust).
 function boxFrame(b, segs) {
-  const sa = segs.get(b.a);
-  const sb = segs.get(b.b);
-  if (!sa || !sb) return null;
+  const ss = b.segs.map((id) => segs.get(id));
+  if (ss.length < 2 || ss.some((s) => !s)) return null;
   const mid = (s) => ({ x: (s.p.x + s.q.x) / 2, y: (s.p.y + s.q.y) / 2 });
-  const P = mid(sa);
-  const Q = mid(sb);
-  const ux = sa.q.x - sa.p.x;
-  const uy = sa.q.y - sa.p.y;
+  const mids = ss.map(mid);
+  const ux = ss[0].q.x - ss[0].p.x;
+  const uy = ss[0].q.y - ss[0].p.y;
   const ul = Math.hypot(ux, uy) || 1;
   const U = { x: ux / ul, y: uy / ul };
   const Lv = { x: U.y, y: -U.x }; // the viewer's left of U (screen y points down)
-  const C = { x: (P.x + Q.x) / 2, y: (P.y + Q.y) / 2 };
-  const la = (P.x - C.x) * Lv.x + (P.y - C.y) * Lv.y;
+  const C = {
+    x: mids.reduce((a, m) => a + m.x, 0) / mids.length,
+    y: mids.reduce((a, m) => a + m.y, 0) / mids.length,
+  };
+  const offs = mids.map((m) => (m.x - C.x) * Lv.x + (m.y - C.y) * Lv.y);
+  const order = ss.map((_, i) => i).sort((i, j) => offs[j] - offs[i]); // left first
   const pt = (s, l) => ({ x: C.x + s * U.x + l * Lv.x, y: C.y + s * U.y + l * Lv.y });
-  return { sa, sb, C, la, lb: -la, pt };
+  return { ss, C, offs, order, pt };
 }
 
 function drawBox(b, i, segs) {
   const f = boxFrame(b, segs);
   if (!f) return;
   const z = zoom();
-  const k = Math.abs(b.n);
-  const hw = Math.abs(f.la) + 10 / z;
-  const lenA = Math.hypot(f.sa.q.x - f.sa.p.x, f.sa.q.y - f.sa.p.y);
-  // roughly square crossings, within the strand
-  const hh = showTwists ? Math.min(0.45 * lenA, Math.max(14 / z, k * Math.max(9 / z, 0.45 * hw))) : 13 / z;
-  const corners = [f.pt(-hh, -hw), f.pt(hh, -hw), f.pt(hh, hw), f.pt(-hh, hw)];
+  const k = f.ss.length;
+  const delta = [];
+  for (let m = k - 1; m >= 1; m--) for (let i = 0; i < m; i++) delta.push(i);
+  const word = [];
+  for (let t = 0; t < Math.abs(b.n); t++) word.push(...delta);
+  const pad = 10 / z;
+  const lMax = Math.max(...f.offs) + pad;
+  const lMin = Math.min(...f.offs) - pad;
+  const minLen = Math.min(...f.ss.map((s) => Math.hypot(s.q.x - s.p.x, s.q.y - s.p.y)));
+  const gap = (lMax - lMin) / Math.max(1, k);
+  // roughly square crossings, within the strands
+  const hh = showTwists
+    ? Math.min(0.45 * minLen, Math.max(14 / z, (word.length * Math.max(9 / z, 0.9 * gap)) / 2))
+    : 13 / z;
+  const corners = [f.pt(-hh, lMin), f.pt(hh, lMin), f.pt(hh, lMax), f.pt(-hh, lMax)];
   const r = el("polygon", {
     points: corners.map((p) => `${p.x},${p.y}`).join(" "),
     class: "tbox" + (i === selectedBox ? " sel" : ""),
   });
   r.dataset.box = i;
-  el("title", {}, r).textContent = `twist box: ${b.n} half-twists`;
-  if (showTwists && k > 0) {
-    const lL = Math.max(f.la, f.lb);
-    const lR = Math.min(f.la, f.lb);
-    let leftColor = COLORS[(f.la > f.lb ? f.sa : f.sb).c % COLORS.length];
-    let rightColor = COLORS[(f.la > f.lb ? f.sb : f.sa).c % COLORS.length];
-    for (let j = 0; j < k; j++) {
-      const s0 = -hh + (2 * hh * j) / k;
-      const s1 = -hh + (2 * hh * (j + 1)) / k;
-      const lr = [f.pt(s0, lL), f.pt(s1, lR)]; // left to right
-      const rl = [f.pt(s0, lR), f.pt(s1, lL)]; // right to left
+  el("title", {}, r).textContent = `twist box: ${b.n} half-twists of ${k} strands`;
+  if (showTwists && word.length > 0) {
+    const lpos = f.order.map((i) => f.offs[i]); // left to right
+    const colors = f.order.map((i) => COLORS[f.ss[i].c % COLORS.length]);
+    const line = (seg, cls, color) => {
+      const a = el("line", { x1: seg[0].x, y1: seg[0].y, x2: seg[1].x, y2: seg[1].y, class: cls });
+      if (color) a.setAttribute("stroke", color);
+      a.style.pointerEvents = "none";
+    };
+    word.forEach((i, j) => {
+      const s0 = -hh + (2 * hh * j) / word.length;
+      const s1 = -hh + (2 * hh * (j + 1)) / word.length;
+      for (let q = 0; q < k; q++)
+        if (q !== i && q !== i + 1) line([f.pt(s0, lpos[q]), f.pt(s1, lpos[q])], "strand", colors[q]);
+      const lr = [f.pt(s0, lpos[i]), f.pt(s1, lpos[i + 1])]; // left to right
+      const rl = [f.pt(s0, lpos[i + 1]), f.pt(s1, lpos[i])]; // right to left
       const [over, overColor, under, underColor] =
-        b.n > 0 ? [lr, leftColor, rl, rightColor] : [rl, rightColor, lr, leftColor];
-      const line = (seg, cls, color) => {
-        const a = el("line", { x1: seg[0].x, y1: seg[0].y, x2: seg[1].x, y2: seg[1].y, class: cls });
-        if (color) a.setAttribute("stroke", color);
-        a.style.pointerEvents = "none";
-      };
+        b.n > 0 ? [lr, colors[i], rl, colors[i + 1]] : [rl, colors[i + 1], lr, colors[i]];
       line(under, "strand", underColor);
       line(over, "halo");
       line(over, "strand", overColor);
-      [leftColor, rightColor] = [rightColor, leftColor];
-    }
+      [colors[i], colors[i + 1]] = [colors[i + 1], colors[i]];
+    });
   } else {
     const t = el("text", { x: f.C.x, y: f.C.y, class: "tlabel", "font-size": 13 / z });
     t.textContent = fmtInt(b.n);
@@ -421,6 +446,7 @@ function updateBoxPanel() {
   $("family-card").hidden = !b;
   if (!b) return;
   if (document.activeElement !== $("box-n")) $("box-n").value = b.n;
+  $("box-title").textContent = `Twist box (${b.segs.length} strands)`;
   $("box-show").checked = showTwists;
 }
 
@@ -444,6 +470,83 @@ function selectBox(i) {
   }
   render();
 }
+
+function updateSelectionPanel() {
+  const show = mode === "twist" && selection.size > 0;
+  $("sel-panel").hidden = !show;
+  if (!show) return;
+  $("sel-count").textContent = `${selection.size} strand${selection.size === 1 ? "" : "s"} selected`;
+  $("sel-parallel").disabled = selection.size < 2;
+  $("sel-box").disabled = selection.size < 2;
+}
+
+const inSomeBox = (id) => drawing.boxes.some((b) => b.segs.includes(id));
+
+/** Gives every selected strand a short middle section on evenly spaced
+ *  parallel tracks (its ends stay put); the new sections become the selection. */
+function makeParallel() {
+  const ids = [...selection];
+  if (ids.length < 2) return;
+  if (ids.some(inSomeBox)) return flash("A selected strand already carries a twist box.");
+  const segs = segmentById();
+  const z = zoom();
+  const unit = (v) => {
+    const l = Math.hypot(v.x, v.y) || 1;
+    return { x: v.x / l, y: v.y / l };
+  };
+  const S = ids.map((id) => ({ id, ...segs.get(id) }));
+  const u0 = unit({ x: S[0].q.x - S[0].p.x, y: S[0].q.y - S[0].p.y });
+  const sum = { x: 0, y: 0 };
+  for (const s of S) {
+    const u = unit({ x: s.q.x - s.p.x, y: s.q.y - s.p.y });
+    s.sign = u.x * u0.x + u.y * u0.y >= 0 ? 1 : -1;
+    sum.x += s.sign * u.x;
+    sum.y += s.sign * u.y;
+  }
+  const U = unit(sum);
+  const Lv = { x: U.y, y: -U.x };
+  const mids = S.map((s) => ({ x: (s.p.x + s.q.x) / 2, y: (s.p.y + s.q.y) / 2 }));
+  const C = { x: mids.reduce((a, m) => a + m.x, 0) / S.length, y: mids.reduce((a, m) => a + m.y, 0) / S.length };
+  S.forEach((s, i) => (s.off = (mids[i].x - C.x) * Lv.x + (mids[i].y - C.y) * Lv.y));
+  const order = [...S].sort((a, b) => b.off - a.off); // left to right
+  const gap = 26 / z;
+  const minLen = Math.min(...S.map((s) => Math.hypot(s.q.x - s.p.x, s.q.y - s.p.y)));
+  const h = Math.max(20 / z, Math.min(70 / z, 0.3 * minLen));
+  const fresh = [];
+  order.forEach((s, rank) => {
+    const t = ((S.length - 1) / 2 - rank) * gap;
+    const base = { x: C.x + t * Lv.x, y: C.y + t * Lv.y };
+    const A = { id: nextId(), x: base.x - s.sign * h * U.x, y: base.y - s.sign * h * U.y };
+    const B = { id: nextId(), x: base.x + s.sign * h * U.x, y: base.y + s.sign * h * U.y };
+    const poly = drawing.components[s.c];
+    const at = poly.findIndex((v) => v.id === s.id);
+    poly.splice(at + 1, 0, A, B);
+    fresh.push(A.id); // the section A -> B
+  });
+  selection = new Set(fresh);
+  pdSource = null;
+  commit();
+  changed();
+}
+
+function addTwistBox() {
+  const ids = [...selection];
+  if (ids.length < 2) return;
+  if (ids.some(inSomeBox)) return flash("A selected strand already carries a twist box.");
+  drawing.boxes.push({ segs: ids, n: 1 });
+  selection.clear();
+  commit();
+  setMode("edit");
+  selectBox(drawing.boxes.length - 1);
+  changed();
+}
+
+$("sel-parallel").onclick = makeParallel;
+$("sel-box").onclick = addTwistBox;
+$("sel-clear").onclick = () => {
+  selection.clear();
+  render();
+};
 
 function nearestSegment(p) {
   let best = null;
@@ -511,7 +614,8 @@ function point(e) {
 const zoom = () => svg.getScreenCTM()?.a || 1;
 
 function setMode(m) {
-  twistPick = null;
+  if (m !== "twist") selection.clear();
+  band = null;
   if (m !== "draw") pending = null;
   else pending = pending || { points: [], cursor: null };
   mode = m;
@@ -550,22 +654,13 @@ svg.addEventListener("pointerdown", (e) => {
   if (mode === "twist") {
     const id = nearestSegment(p);
     if (id === null) {
-      twistPick = null;
+      band = { a: p, b: p };
+      svg.setPointerCapture(e.pointerId);
       return render();
     }
-    const inBox = (s) => drawing.boxes.some((b) => b.a === s || b.b === s);
-    if (inBox(id)) return flash("That strand already has a twist box; add a vertex to split it.");
-    if (twistPick === null || twistPick === id) {
-      twistPick = id;
-      return render();
-    }
-    drawing.boxes.push({ a: twistPick, b: id, n: 1 });
-    twistPick = null;
-    commit();
-    setMode("edit");
-    selectBox(drawing.boxes.length - 1);
-    changed();
-    return;
+    if (selection.has(id)) selection.delete(id);
+    else selection.add(id);
+    return render();
   }
   if (selectedBox !== null && !t.dataset.vertex && !t.dataset.crossing) selectBox(null);
   if (t.dataset.vertex) {
@@ -580,6 +675,11 @@ svg.addEventListener("pointerdown", (e) => {
 
 svg.addEventListener("pointermove", (e) => {
   const p = point(e);
+  if (band) {
+    band.b = p;
+    render();
+    return;
+  }
   if (mode === "draw" && pending) {
     pending.cursor = p;
     render();
@@ -597,6 +697,21 @@ svg.addEventListener("pointermove", (e) => {
 });
 
 svg.addEventListener("pointerup", () => {
+  if (band) {
+    // select the strands whose midpoints lie in the rectangle
+    const [x0, x1] = [Math.min(band.a.x, band.b.x), Math.max(band.a.x, band.b.x)];
+    const [y0, y1] = [Math.min(band.a.y, band.b.y), Math.max(band.a.y, band.b.y)];
+    if (x1 - x0 < 3 / zoom() && y1 - y0 < 3 / zoom()) selection.clear();
+    for (const poly of drawing.components)
+      poly.forEach((v, k) => {
+        const w = poly[(k + 1) % poly.length];
+        const m = { x: (v.x + w.x) / 2, y: (v.y + w.y) / 2 };
+        if (m.x >= x0 && m.x <= x1 && m.y >= y0 && m.y <= y1) selection.add(v.id);
+      });
+    band = null;
+    render();
+    return;
+  }
   if (drag?.moved) commit();
   drag = null;
 });
@@ -659,6 +774,7 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
   else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.shiftKey && e.key === "Z"))) { e.preventDefault(); redo(); }
   else if (e.key === "Escape" && mode === "draw") { pending = { points: [], cursor: null }; render(); }
+  else if (e.key === "Escape" && mode === "twist") { selection.clear(); render(); }
   else if (e.key === "Enter" && mode === "draw") closePending();
   else if (e.key === "d") setMode("draw");
   else if (e.key === "t") setMode("twist");
@@ -711,7 +827,7 @@ function drawPD(pd, freeLoops) {
   if (res.error) return res.error;
   analysis = lastAnalysis = null; // a new drawing: no choices to carry over
   drawing = res.drawing;
-  drawing.boxes ||= [];
+  drawing.boxes = normBoxes(drawing.boxes);
   idCounter = res.next_id;
   pdSource = null;
   selectedBox = null;
@@ -758,7 +874,7 @@ $("reverse").onclick = () => {
   const segs = segmentById();
   const endOf = (id) => segs.get(id).q.id; // after reversal, the segment starts at its old end
   drawing.over = drawing.over.map(([a, b, o]) => [endOf(a), endOf(b), endOf(o)]);
-  drawing.boxes = drawing.boxes.map((b) => ({ a: endOf(b.a), b: endOf(b.b), n: b.n }));
+  drawing.boxes = drawing.boxes.map((b) => ({ segs: b.segs.map(endOf), n: b.n }));
   drawing.components = drawing.components.map((poly) => [...poly].reverse());
   commit();
   changed();
@@ -1104,7 +1220,7 @@ function encodeState() {
   const compact = {
     c: drawing.components.map((poly) => poly.map((v) => [v.id, Math.round(v.x), Math.round(v.y)])),
     o: drawing.over,
-    b: drawing.boxes.map((b) => [b.a, b.b, b.n]),
+    b: drawing.boxes.map((b) => ({ s: b.segs, n: b.n })),
   };
   return btoa(JSON.stringify(compact)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -1113,7 +1229,7 @@ function decodeState(s) {
   return {
     components: o.c.map((poly) => poly.map(([id, x, y]) => ({ id, x, y }))),
     over: o.o || [],
-    boxes: (o.b || []).map(([a, b, n]) => ({ a, b, n })),
+    boxes: (o.b || []).map((x) => (Array.isArray(x) ? { segs: [x[0], x[1]], n: x[2] } : { segs: x.s, n: x.n })),
   };
 }
 function saveLocal() {

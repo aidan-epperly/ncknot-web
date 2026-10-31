@@ -48,6 +48,7 @@ with sync_playwright() as p:
     page.click("button[data-mode=twist]")
     page.mouse.click(x0 + 120, y0 + 150)  # right side of the first
     page.mouse.click(x0 + 200, y0 + 150)  # left side of the second
+    page.click("#sel-box")
     page.wait_for_selector("#box-panel:not([hidden])")
     wait_ident(page, "0_1")  # one half-twist: the unknot
     page.click("#box-plus")

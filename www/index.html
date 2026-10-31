@@ -19,7 +19,7 @@
         <div class="group" role="radiogroup" aria-label="Mode">
           <button data-mode="draw" class="mode" title="Click to place vertices; click the first vertex to close (D)">Draw</button>
           <button data-mode="edit" class="mode" title="Drag vertices, click a crossing to flip it (E)">Edit</button>
-          <button data-mode="twist" class="mode" title="Click two neighboring strands to put a twist box on them (T)">Twist box</button>
+          <button data-mode="twist" class="mode" title="Select strands, make them parallel, put a twist box on them (T)">Twist box</button>
         </div>
         <div class="group">
           <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
@@ -45,8 +45,14 @@
         <svg id="canvas" role="img" aria-label="Knot diagram"></svg>
         <div id="banner" class="banner" hidden></div>
         <div id="hint" class="hint"></div>
+        <div id="sel-panel" class="box-panel sel-panel" hidden>
+          <span class="box-title" id="sel-count"></span>
+          <button id="sel-parallel" title="Give the selected strands a parallel, evenly spaced middle section">Make parallel</button>
+          <button id="sel-box" title="Put a twist box on the selected strands">Add twist box</button>
+          <button id="sel-clear" title="Clear the selection (Esc)">Clear</button>
+        </div>
         <div id="box-panel" class="box-panel" hidden>
-          <span class="box-title">Twist box</span>
+          <span class="box-title" id="box-title">Twist box</span>
           <button id="box-minus" title="One half-twist less (−)">−</button>
           <input id="box-n" type="number" step="1" aria-label="Half-twists">
           <button id="box-plus" title="One half-twist more (+)">+</button>

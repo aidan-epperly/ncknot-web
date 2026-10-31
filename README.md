@@ -40,18 +40,25 @@ The build needs Rust's `wasm32-unknown-unknown` target
   - **SVG** downloads the picture.
 
   Undo and redo are Ctrl+Z and Ctrl+Y.
-- **Twist boxes** (`T`): click two neighboring strands, with no strand
-  between them, to put a box at their midpoints. A box holds n half-twists.
-  - Change n with + and −, or type it.
-  - "show twists" draws the crossings instead of the number.
-  - Looking along the first strand you clicked, the strand coming from the
-    left passes over when n > 0. Two parallel strands therefore get positive
-    crossings, and n = 3 between two loops is the right-handed trefoil.
-  - An odd box reconnects its strands; orientations are re-solved over the
-    whole diagram.
-  - With a box selected, **Twist family** computes the determinant,
-    signature, Alexander and Jones polynomials and table matches for a range
-    of n.
+- **Twist boxes** (`T`): a box holds n half-twists of a bundle of two or
+  more strands, the braid Δⁿ with Δ = (σ₁⋯σₖ₋₁)(σ₁⋯σₖ₋₂)⋯σ₁; n = 2 is a full twist.
+  - **Select strands:** click segments to toggle them, or drag a rectangle to
+    select every segment whose midpoint it contains. Esc clears.
+  - **Make parallel** gives the selected strands a short middle section on
+    evenly spaced parallel tracks (their ends stay put); the new sections stay
+    selected.
+  - **Add twist box** puts a box on the selection, at the segments'
+    midpoints. No other strand may pass between neighboring strands of the
+    bundle.
+  - Change n with + and −, or type it; "show twists" draws the crossings.
+  - Looking along the first selected strand, the strands are ordered left to
+    right, and for n > 0 the left strand of each crossing passes over. Parallel
+    strands therefore get positive crossings; n = 3 on two loops is the
+    right-handed trefoil.
+  - Orientations are re-solved over the whole diagram when a box reconnects
+    strands.
+  - With a box selected, **Twist family** computes the determinant, signature,
+    Alexander and Jones polynomials and table matches for a range of n.
 - **Braids and the knot table:**
   - press the σᵢ / σᵢ⁻¹ buttons or type a word (`1 -2 1 -2`) to draw a braid
     closure;
@@ -132,9 +139,10 @@ www/              index.html, style.css, app.js (editor, panels), braid.js
                   (braid closures as drawings), knot.js (wasm loader), worker.js
 tests/geometry.rs native tests: pentagram = 5_1 when alternating, Hopf
                   link signs on screen coordinates, degenerate drawings, API
-tests/twist_boxes.rs  boxes against integer tangle closures (T(2,n), unknot)
+tests/twist_boxes.rs  boxes against integer tangle closures (T(2,n), unknot) and
+                  k-strand boxes against braid closures of Δⁿ
 tests/layout.rs   layouts round-trip: table knots, random braids, split links
-tests/browser/    smoke.py, features.py, drag.py: Playwright (Edge) end-to-end checks
+tests/browser/    smoke.py, features.py, drag.py, bundle.py: Playwright (Edge) end-to-end checks
 build.py          build and serve
 ```
 
@@ -146,6 +154,7 @@ python build.py --serve-only 8765 &          # then:
 python tests/browser/smoke.py http://localhost:8765/ target/screenshots
 python tests/browser/features.py http://localhost:8765/ target/screenshots
 python tests/browser/drag.py http://localhost:8765/ target/screenshots
+python tests/browser/bundle.py http://localhost:8765/ target/screenshots
 ```
 
 The browser test runs in Edge and checks:
