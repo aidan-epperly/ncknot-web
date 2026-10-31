@@ -264,6 +264,27 @@ function evalExpr(text) {
   return v;
 }
 
+/** Creates the parameters an expression names that do not exist yet (value
+ *  2, so that a bundle shows as a bundle); returns their names. */
+function ensureParams(text) {
+  const added = [];
+  for (const name of String(text).match(/[A-Za-z_][A-Za-z_0-9]*/g) || []) {
+    if (!(name in params)) {
+      params[name] = 2;
+      added.push(name);
+    }
+  }
+  if (added.length) {
+    renderParams();
+    saveLocal();
+  }
+  return added;
+}
+
+/** A message about parameters just created (empty if none). */
+const addedNote = (added) =>
+  added.length ? `Added parameter${added.length > 1 ? "s" : ""} ${added.map((n) => `${n} = 2`).join(", ")}; change ${added.length > 1 ? "them" : "it"} under Parameters and bundles.` : "";
+
 const multExpr = (c) => (drawing.mult && drawing.mult[c]) || "1";
 const boxCount = (b) => (b.expr ? evalExpr(b.expr) : b.n);
 
@@ -790,6 +811,7 @@ $("sel-bundle").onclick = () => {
   const first = [...comps][0];
   const text = prompt("Multiplicity of the selected components (a number or an expression such as n or n+1):", multExpr(first));
   if (text === null) return;
+  const added = ensureParams(text);
   try {
     evalExpr(text);
   } catch (e) {
@@ -799,6 +821,7 @@ $("sel-bundle").onclick = () => {
   for (const c of comps) drawing.mult[c] = text.trim() || "1";
   commit();
   changed();
+  if (added.length) flash(addedNote(added));
 };
 $("sel-box").onclick = addTwistBox;
 $("sel-clear").onclick = () => {
@@ -1116,6 +1139,7 @@ $("box-n").onchange = () => {
   const text = $("box-n").value.trim();
   if (/^-?\d+$/.test(text)) return setBoxN(Number(text));
   const b = drawing.boxes[selectedBox];
+  const added = ensureParams(text);
   try {
     evalExpr(text);
   } catch (e) {
@@ -1124,6 +1148,7 @@ $("box-n").onchange = () => {
   b.expr = text;
   commit();
   changed();
+  if (added.length) flash(addedNote(added));
 };
 $("box-delete").onclick = removeBox;
 $("box-show").onchange = () => {
