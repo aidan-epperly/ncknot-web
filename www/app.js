@@ -13,7 +13,6 @@ let selectedBox = null; // index into drawing.boxes
 let selection = new Set(); // strands (segment ids) selected in twist-box mode
 let params = {}; // parameter values, e.g. { n: 3, m: 2 }
 let showStrands = false; // draw bundles as their parallel copies
-let computeAnalysis = null; // analysis of the expanded diagram (what the invariants use)
 let band = null; // rubber-band rectangle while selecting
 let showTwists = false;
 let pending = null; // vertices of a component being drawn
@@ -74,33 +73,51 @@ function makeWorker() {
 }
 let fast = makeWorker();
 let fastBusy = false;
-let fastQueued = null;
 let requestId = 0;
 let diagramKey = ""; // identifies the diagram the panels describe
 
 function sendFast(request) {
+  // a newer request makes the running one obsolete: restart the worker
   if (fastBusy) {
-    fastQueued = request;
-    return;
+    fast.terminate();
+    fast = makeWorker();
   }
   fastBusy = true;
+  busy(true);
   const id = ++requestId;
-  fast.onmessage = (e) => {
+  const w = fast;
+  const done = () => {
     fastBusy = false;
-    if (e.data.id === id) showBasic(e.data.result, request);
-    if (fastQueued) {
-      const q = fastQueued;
-      fastQueued = null;
-      sendFast(q);
-    }
+    busy(false);
   };
-  fast.onerror = () => {
-    fastBusy = false;
+  w.onmessage = (e) => {
+    if (w !== fast) return; // a restarted worker's late answer
+    done();
+    if (e.data.result.fatal) {
+      fast = makeWorker();
+    }
+    if (e.data.id === id) showBasic(e.data.result, request);
+  };
+  w.onerror = () => {
+    if (w !== fast) return;
+    done();
     fast.terminate();
     fast = makeWorker();
     showBasic({ error: "the computation failed" }, request);
   };
-  fast.postMessage({ id, request });
+  w.postMessage({ id, request });
+}
+
+// "computing…" when the invariants take more than a moment
+let busyTimer = 0;
+function busy(on) {
+  clearTimeout(busyTimer);
+  if (!on) return;
+  busyTimer = setTimeout(() => {
+    document.querySelector(".results").classList.add("stale");
+    $("ident").innerHTML =
+      '<span class="note">computing… (changing the diagram or a parameter restarts it)</span>';
+  }, 400);
 }
 
 const heavy = { worker: null };
@@ -142,13 +159,17 @@ function changed() {
 
 function currentRequest(task, extra = {}) {
   if (pdSource) return { task, pd: pdSource.pd, free_loops: pdSource.free_loops, ...extra };
-  if (!computeAnalysis) return null;
-  return { task, pd: computeAnalysis.pd, free_loops: computeAnalysis.free_loops, ...extra };
+  if (!analysis) return null;
+  try {
+    return { task, drawing: concreteDrawing(true), ...extra };
+  } catch {
+    return null;
+  }
 }
 
 function requestBasic() {
   const req = currentRequest("basic", { p: Number($("prime").value) });
-  const key = req ? JSON.stringify([req.pd, req.free_loops]) : "";
+  const key = req ? JSON.stringify([req.pd, req.free_loops, req.drawing]) : "";
   if (key !== diagramKey) {
     diagramKey = key;
     clearHeavyPanels();
@@ -170,12 +191,11 @@ function analyze() {
   drawing.boxes = drawing.boxes.filter((b) => b.segs.every((s) => ids.has(s)));
   if (selectedBox !== null && selectedBox >= drawing.boxes.length) selectedBox = null;
   let shown;
-  let full;
   try {
     shown = concreteDrawing(false);
-    full = concreteDrawing(true);
+    concreteDrawing(true); // reports bad expressions
   } catch (e) {
-    analysis = computeAnalysis = null;
+    analysis = null;
     return e.message;
   }
   let res;
@@ -186,36 +206,23 @@ function analyze() {
     res = { error: `internal error (${e})` };
   }
   if (res.error) {
-    analysis = computeAnalysis = null;
+    analysis = null;
     return res.error;
   }
   if (carryChoices(lastAnalysis, res)) {
     // re-analyse with the carried choices
     shown.over = drawing.over;
-    full.over = drawing.over;
     try {
       res = knots.analyze(shown);
     } catch (e) {
       res = { error: `internal error (${e})` };
     }
     if (res.error) {
-      analysis = computeAnalysis = null;
+      analysis = null;
       return res.error;
     }
   }
   analysis = lastAnalysis = res;
-  computeAnalysis = res;
-  if (needsExpansion()) {
-    let exp;
-    try {
-      exp = knots.analyze(full);
-    } catch (e) {
-      loadKnots().then((k) => (knots = k));
-      exp = { error: `internal error (${e})` };
-    }
-    computeAnalysis = exp.error ? null : exp;
-    if (exp.error) return exp.error;
-  }
   return null;
 }
 
@@ -296,9 +303,10 @@ function needsExpansion() {
  *  as single strands, boxes on one drawn strand left out) or, with `full`,
  *  everything including multiplicities. */
 function concreteDrawing(full) {
+  const parity = (n) => (n === 0 ? 0 : Math.sign(n) * (Math.abs(n) % 2 === 1 ? 1 : 2));
   const boxes = drawing.boxes
     .filter((b) => full || b.segs.length >= 2)
-    .map((b) => ({ segs: b.segs, n: boxCount(b) }));
+    .map((b) => ({ segs: b.segs, n: full ? boxCount(b) : parity(boxCount(b)) }));
   const d = { components: drawing.components, over: drawing.over, boxes };
   if (full) {
     d.mult = drawing.components.map((_, c) => {
@@ -389,17 +397,19 @@ $("sweep-go").onclick = () => {
   }
   if (combos.length > 60) return flash(`${combos.length} combinations; narrow the ranges to at most 60.`);
   const saved = params;
-  const items = combos.map((c) => {
+  const items = [];
+  const bad = [];
+  for (const c of combos) {
     params = c;
     const label = names.map((n) => `${n}=${c[n]}`).join(", ");
     try {
-      const a = knots.analyze(concreteDrawing(true));
-      return a.error ? { label, pd: [], free_loops: 1, note: a.error } : { label, pd: a.pd, free_loops: a.free_loops };
+      items.push({ label, drawing: concreteDrawing(true) });
     } catch (e) {
-      return { label, pd: [], free_loops: 1, note: e.message };
+      bad.push(`${label}: ${e.message}`);
     }
-  });
+  }
   params = saved;
+  if (bad.length) return flash(bad[0]);
   $("sweep-status").textContent = `computing ${items.length} diagrams…`;
   $("sweep").innerHTML = "";
   runHeavy({ task: "family", items }, (res) => {
@@ -677,7 +687,7 @@ function drawBox(b, i, segs) {
   el("title", {}, r).textContent = b.expr
     ? `twist box: ${b.expr} = ${count} half-twists of ${k} strands`
     : `twist box: ${count} half-twists of ${k} strands`;
-  if (showTwists && word.length > 0 && k > 1) {
+  if (showTwists && word.length > 0 && word.length <= 300 && k > 1) {
     const lpos = f.order.map((i) => f.offs[i]); // left to right
     const colors = f.order.map((i) => COLORS[f.ss[i].c % COLORS.length]);
     const line = (seg, cls, color) => {
@@ -857,6 +867,18 @@ function nearestSegment(p) {
 function renderStrands() {
   let dr;
   let an;
+  const segments = drawing.components.reduce((sum, poly, c) => {
+    try {
+      return sum + poly.length * Math.max(1, evalExpr(multExpr(c)));
+    } catch {
+      return sum + poly.length;
+    }
+  }, 0);
+  if (segments > 3000) {
+    $("banner").hidden = false;
+    $("banner").textContent = `Too many strands to draw (${segments} segments); lower the parameters to see them.`;
+    return;
+  }
   try {
     const res = knots.expand({ drawing: concreteDrawing(true), spacing: 7 / zoom() });
     if (res.error) throw new Error(res.error);
@@ -1393,7 +1415,9 @@ function showEmpty() {
   for (const id of ["jones", "alexander", "conway", "colorings", "cover", "linking", "pd"]) $(id).textContent = "";
 }
 
+let shown = { count: 0, crossings: null }; // the latest invariants shown (for the tests)
 function showBasic(res, req) {
+  shown = { count: shown.count + 1, crossings: res.error ? null : res.crossings };
   document.querySelector(".results").classList.remove("stale");
   if (res.error) {
     $("ident").innerHTML = `<span class="err">${escapeHTML(res.error)}</span>`;
@@ -1462,7 +1486,9 @@ $("kh-go").onclick = () => {
   const req = currentRequest("khovanov", { ring: $("ring").value });
   if (!req) return;
   $("khovanov").innerHTML = "";
-  $("kh-status").textContent = `computing (${req.pd.length} crossings, 2^${req.pd.length} states)…`;
+  // the crossing count of the last invariants shown (the request may carry the drawing)
+  const n = shown.crossings;
+  $("kh-status").textContent = n === null ? "computing…" : `computing (${n} crossings, 2^${n} states)…`;
   const t0 = performance.now();
   runHeavy(req, (res) => {
     if (res.canceled) return ($("kh-status").textContent = "canceled");
@@ -1536,16 +1562,15 @@ $("fam-go").onclick = () => {
     const d = JSON.parse(JSON.stringify(drawing));
     d.boxes[selectedBox].n = n;
     delete d.boxes[selectedBox].expr;
-    let a;
+    const saved = drawing;
+    drawing = d;
     try {
-      const saved = drawing;
-      drawing = d;
-      a = knots.analyze(concreteDrawing(true));
-      drawing = saved;
+      items.push({ label: String(n), drawing: concreteDrawing(true) });
     } catch (e) {
-      a = { error: e.message };
+      drawing = saved;
+      return flash(e.message);
     }
-    items.push(a.error ? { label: String(n), pd: [], free_loops: 1 } : { label: String(n), pd: a.pd, free_loops: a.free_loops });
+    drawing = saved;
   }
   $("fam-status").textContent = `computing ${items.length} diagrams…`;
   $("family").innerHTML = "";
@@ -1594,6 +1619,7 @@ function saveLocal() {
 // read-only hooks for the browser tests
 window.knotWorkbench = {
   state: () => JSON.parse(JSON.stringify({ drawing, analysis })),
+  shown: () => shown,
   toScreen: (x, y) => {
     const pt = svg.createSVGPoint();
     pt.x = x;

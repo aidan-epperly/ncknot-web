@@ -114,8 +114,11 @@ The build needs Rust's `wasm32-unknown-unknown` target
   - in a Web Worker (`www/worker.js`), for the invariants, so the page stays
     responsive.
 
-  Long jobs (Khovanov homology, representations) run in a second worker,
-  which Cancel simply terminates.
+  Every change of the diagram or a parameter restarts that worker, so a slow
+  computation (say, a large bundle) never delays the next one; bundles are
+  expanded inside the worker too. Long jobs (Khovanov homology,
+  representations, sweeps) run in a second worker, which Cancel simply
+  terminates.
 - **Panics.** A Rust panic becomes a WebAssembly trap. The page then
   reloads the module (or replaces the worker) and shows an error, instead of
   freezing.
@@ -156,7 +159,7 @@ tests/geometry.rs native tests: pentagram = 5_1 when alternating, Hopf
 tests/twist_boxes.rs  boxes against integer tangle closures (T(2,n), unknot) and
                   k-strand boxes against braid closures of Δⁿ
 tests/layout.rs   layouts round-trip: table knots, random braids, split links
-tests/browser/    smoke.py, features.py, drag.py, bundle.py, params.py: Playwright (Edge) end-to-end checks
+tests/browser/    smoke.py, features.py, drag.py, bundle.py, params.py, restart.py: Playwright (Edge) end-to-end checks
 build.py          build and serve
 ```
 
@@ -170,6 +173,7 @@ python tests/browser/features.py http://localhost:8765/ target/screenshots
 python tests/browser/drag.py http://localhost:8765/ target/screenshots
 python tests/browser/bundle.py http://localhost:8765/ target/screenshots
 python tests/browser/params.py http://localhost:8765/ target/screenshots
+python tests/browser/restart.py http://localhost:8765/ target/screenshots
 ```
 
 The browser test runs in Edge and checks:
