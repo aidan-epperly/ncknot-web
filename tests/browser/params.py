@@ -71,6 +71,12 @@ with sync_playwright() as p:
     page.wait_for_function("document.querySelectorAll('.param').length === 2")  # m was created (= 2)
     assert "Added parameter m = 2" in page.inner_text("#banner"), page.inner_text("#banner")
     page.locator(".param").nth(1).locator("button").nth(0).click()  # m = 1
+    label = page.locator("#canvas text.tlabel").text_content()
+    assert label == "m", f"box label {label!r}"
+    page.click("#mirror")
+    page.wait_for_function("document.querySelector('#canvas text.tlabel')?.textContent === '−(m)'")
+    page.click("#mirror")
+    page.wait_for_function("document.querySelector('#canvas text.tlabel')?.textContent === 'm'")
     c = expect_crossings(page, 2 * 2 * 3 + 1 * 3 * 2 // 2)
     print("n = 2, m = 1: crossings", c)
     page.screenshot(path=OUT / "params_bundles.png")

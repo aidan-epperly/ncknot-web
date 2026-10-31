@@ -650,7 +650,14 @@ function drawBox(b, i, segs) {
   const delta = [];
   for (let m = k - 1; m >= 1; m--) for (let i = 0; i < m; i++) delta.push(i);
   const word = [];
-  for (let t = 0; t < Math.abs(b.n); t++) word.push(...delta);
+  // the current count (an expression is evaluated with the current parameters)
+  let count;
+  try {
+    count = boxCount(b);
+  } catch {
+    count = 0;
+  }
+  for (let t = 0; t < Math.abs(count); t++) word.push(...delta);
   // a box on one bundle strand spans the drawn bundle
   const pad = (k === 1 ? 14 : 10) / z;
   const lMax = Math.max(...f.offs) + pad;
@@ -667,7 +674,9 @@ function drawBox(b, i, segs) {
     class: "tbox" + (i === selectedBox ? " sel" : ""),
   });
   r.dataset.box = i;
-  el("title", {}, r).textContent = `twist box: ${b.n} half-twists of ${k} strands`;
+  el("title", {}, r).textContent = b.expr
+    ? `twist box: ${b.expr} = ${count} half-twists of ${k} strands`
+    : `twist box: ${count} half-twists of ${k} strands`;
   if (showTwists && word.length > 0 && k > 1) {
     const lpos = f.order.map((i) => f.offs[i]); // left to right
     const colors = f.order.map((i) => COLORS[f.ss[i].c % COLORS.length]);
@@ -684,7 +693,7 @@ function drawBox(b, i, segs) {
       const lr = [f.pt(s0, lpos[i]), f.pt(s1, lpos[i + 1])]; // left to right
       const rl = [f.pt(s0, lpos[i + 1]), f.pt(s1, lpos[i])]; // right to left
       const [over, overColor, under, underColor] =
-        b.n > 0 ? [lr, colors[i], rl, colors[i + 1]] : [rl, colors[i + 1], lr, colors[i]];
+        count > 0 ? [lr, colors[i], rl, colors[i + 1]] : [rl, colors[i + 1], lr, colors[i]];
       line(under, "strand", underColor);
       line(over, "halo");
       line(over, "strand", overColor);
@@ -692,7 +701,7 @@ function drawBox(b, i, segs) {
     });
   } else {
     const t = el("text", { x: f.C.x, y: f.C.y, class: "tlabel", "font-size": 13 / z });
-    t.textContent = fmtInt(b.n);
+    t.textContent = b.expr ? b.expr.replace(/-/g, "−") : fmtInt(count);
   }
 }
 
@@ -1198,7 +1207,10 @@ $("mirror").onclick = () => {
   if (!analysis) return;
   pruneOver();
   drawing.over = drawing.over.map(([a, b, o]) => [a, b, o === a ? b : a]);
-  for (const b of drawing.boxes) b.n = -b.n;
+  for (const b of drawing.boxes) {
+    b.n = -b.n;
+    if (b.expr) b.expr = /^-\((.*)\)$/.test(b.expr) ? b.expr.slice(2, -1) : `-(${b.expr})`;
+  }
   commit();
   changed();
 };
