@@ -153,6 +153,79 @@ function sampleSpline(points, closed, step) {
   return out;
 }
 
+/// Samples the curve the way Kirby diagrams are drawn in papers: every
+/// segment runs along its dominant axis (horizontal or vertical); a segment
+/// whose ends are offset sideways becomes an S-bend leaving and arriving
+/// along that axis (TikZ's `to[out=up, in=down]`); where the axis changes,
+/// the corner is a quarter circle of radius `r`, so the corners of parallel
+/// strands are concentric.
+function sampleTidy(points, closed, r, step) {
+  let pts = closed ? points.slice(0, -1) : points.slice();
+  pts = pts.filter((q, k) => k === 0 || len(sub(q, pts[k - 1])) > 1e-6);
+  if (closed && pts.length > 1 && len(sub(pts[0], pts[pts.length - 1])) < 1e-6) pts.pop();
+  const m = pts.length;
+  if (m < 2) return pts;
+  const nseg = closed ? m : m - 1;
+  const P = (i) => pts[((i % m) + m) % m];
+  // each segment's axis direction (a unit vector along x or y)
+  const dir = [];
+  for (let i = 0; i < nseg; i++) {
+    const d = sub(P(i + 1), P(i));
+    dir.push(Math.abs(d[0]) >= Math.abs(d[1]) ? [Math.sign(d[0]), 0] : [0, Math.sign(d[1])]);
+  }
+  const along = (d, v) => d[0] * v[0] + d[1] * v[1];
+  // the corner radius at each vertex (0 where the curve goes straight on)
+  const rad = new Array(m).fill(0);
+  for (let i = 0; i < m; i++) {
+    if (!closed && (i === 0 || i === m - 1)) continue;
+    const a = dir[(i - 1 + nseg) % nseg], b = dir[i % nseg];
+    if (a[0] === b[0] && a[1] === b[1]) continue;
+    const la = Math.abs(along(a, sub(P(i), P(i - 1)))), lb = Math.abs(along(b, sub(P(i + 1), P(i))));
+    rad[i] = Math.max(2, Math.min(r, la / 2, lb / 2));
+  }
+  const out = [];
+  const push = (q) => {
+    if (!out.length || len(sub(q, out[out.length - 1])) > 1e-6) out.push(q);
+  };
+  const cubic = (a, b, c, d) => {
+    const n = Math.max(4, Math.ceil((len(sub(b, a)) + len(sub(c, b)) + len(sub(d, c))) / step));
+    for (let k = 1; k <= n; k++) {
+      const t = k / n, u = 1 - t;
+      push([
+        u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0],
+        u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1],
+      ]);
+    }
+  };
+  const K = 0.5523; // a quarter circle as a cubic
+  for (let i = 0; i < nseg; i++) {
+    const d = dir[i];
+    const A = P(i), B = P(i + 1);
+    const s = [A[0] + d[0] * rad[i % m], A[1] + d[1] * rad[i % m]];
+    const e = [B[0] - d[0] * rad[(i + 1) % m], B[1] - d[1] * rad[(i + 1) % m]];
+    if (!out.length) push(s);
+    // straight along the axis, or an S-bend with tangents along it
+    const L = along(d, sub(e, s));
+    const lateral = len(sub(sub(e, s), [d[0] * L, d[1] * L]));
+    if (lateral < 0.5) {
+      const from = out[out.length - 1];
+      const n = Math.max(1, Math.ceil(len(sub(e, from)) / step));
+      for (let k = 1; k <= n; k++) push([from[0] + ((e[0] - from[0]) * k) / n, from[1] + ((e[1] - from[1]) * k) / n]);
+    } else {
+      const h = Math.max(L, 1) / 2;
+      cubic(s, [s[0] + d[0] * h, s[1] + d[1] * h], [e[0] - d[0] * h, e[1] - d[1] * h], e);
+    }
+    // the corner at B
+    const j = (i + 1) % m;
+    if (rad[j] > 0 && (closed || i + 1 < nseg)) {
+      const d2 = dir[(i + 1) % nseg];
+      const s2 = [B[0] + d2[0] * rad[j], B[1] + d2[1] * rad[j]];
+      cubic(e, [e[0] + d[0] * rad[j] * K, e[1] + d[1] * rad[j] * K], [s2[0] - d2[0] * rad[j] * K, s2[1] - d2[1] * rad[j] * K], s2);
+    }
+  }
+  return out;
+}
+
 /// Unit normals pointing right of the direction of travel (y down).
 function normals(c) {
   return c.map((_, k) => {
@@ -190,7 +263,7 @@ const SIZE = {
 };
 
 /// Everything the figure shows, in drawing coordinates (y down).
-export function figure(state, { chains, crossings, color }) {
+export function figure(state, { chains, crossings, color, curves: curveStyle = "tidy" }) {
   const pt = new Map(state.points.map((p) => [p.id, [p.x, p.y]]));
   const degree = new Map();
   for (const s of state.segs) {
@@ -283,7 +356,18 @@ export function figure(state, { chains, crossings, color }) {
   const maxHalf = Math.max(0, ...strands.map((st) => ((st.pattern.length - 1) / 2) * SIZE.spacing));
   // centerlines
   for (const st of strands) {
-    st.center = sampleSpline(st.points, st.closed, 3);
+    if (curveStyle === "smooth") st.center = sampleSpline(st.points, st.closed, 3);
+    else {
+      // concentric corners need room for the bundle; a dotted circle with
+      // four corners becomes a stadium
+      const half = ((st.pattern.length - 1) / 2) * SIZE.spacing;
+      let r = half + 26;
+      if (state.handles[st.handle]?.kind === "dotted" && st.closed) {
+        const xs = st.points.map((q) => q[0]), ys = st.points.map((q) => q[1]);
+        r = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) / 2;
+      }
+      st.center = sampleTidy(st.points, st.closed, r, 3);
+    }
     st.normal = normals(st.center);
     st.s = arcLengths(st.center);
   }
@@ -326,7 +410,7 @@ export function figure(state, { chains, crossings, color }) {
       const { cv, atStart } = parts[i];
       const pts = atStart ? cv.points : cv.points.slice().reverse(); // leaving the junction
       const sl = arcLengths(pts);
-      const L = Math.min(SIZE.fan, 0.45 * sl[sl.length - 1]);
+      const L = Math.min(curveStyle === "smooth" ? SIZE.fan : 45, 0.45 * sl[sl.length - 1]);
       let k = 1;
       while (k < pts.length - 2 && sl[k] < L) k++;
       // a cubic from the anchor, along the whole's heading, into the part's
@@ -428,7 +512,10 @@ export function figure(state, { chains, crossings, color }) {
     let best = null;
     for (let k = 0; k < st.center.length; k += 3) {
       if (!st.closed && (st.s[k] < 45 || total - st.s[k] < 45)) continue;
-      const a = st.normal[Math.max(0, k - 6)], b = st.normal[Math.min(st.center.length - 1, k + 6)];
+      // straight for a good stretch either side (the marks span the bundle)
+      const w = 18;
+      if (k < w || k >= st.center.length - w) continue;
+      const a = st.normal[k - w], b = st.normal[k + w];
       if (a[0] * b[0] + a[1] * b[1] < 0.98) continue; // on a bend
       const c = st.center[k];
       const room = Math.min(1e9, ...obstacles.map((o) => len(sub(o, c))));

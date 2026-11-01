@@ -3,7 +3,7 @@
 // (src/kirby.rs).  The drawing is a graph of straight segments; every
 // segment carries a handle, a width (an expression) and a direction.
 
-import { figure, drawSvg, svgFile, tikz, texDocument, bounds } from "./fancy.js?v=9276374899";
+import { figure, drawSvg, svgFile, tikz, texDocument, bounds } from "./fancy.js?v=4587c5bad4";
 
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
@@ -349,10 +349,11 @@ function el(name, attrs, parent) {
 }
 
 function currentFigure() {
-  return figure(state, { chains: allChains(), crossings: crossings(), color });
+  return figure(state, { chains: allChains(), crossings: crossings(), color, curves: curveStyle() });
 }
 
 const figureOptions = () => ({ colored: $("k-colored").checked });
+const curveStyle = () => $("k-curves").value;
 
 function render() {
   svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
@@ -644,7 +645,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./kirby-worker.js?v=9276374899", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=4587c5bad4", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.
@@ -1152,6 +1153,7 @@ $("k-fancy").onclick = () => {
   render();
 };
 $("k-colored").onchange = render;
+$("k-curves").onchange = () => (fancy && fitFigure(), render());
 $("k-svg").onclick = () => download("kirby-diagram.svg", svgFile(currentFigure(), figureOptions()), "image/svg+xml");
 $("k-tex").onclick = () => download("kirby-diagram.tex", texDocument(currentFigure(), figureOptions()), "text/x-tex");
 $("k-tikz").onclick = async () => {

@@ -147,7 +147,13 @@ of the parameters at once.
   - **Twist boxes:** they show two crossings and ⋮, with the count beside
     them.
   - **Also drawn:** framings, the dots of dotted circles and direction
-    arrows, placed away from crossings; strands have rounded corners.
+    arrows, placed away from crossings.
+  - **Curves:** *tidy* (the default) follows the convention of published
+    Kirby diagrams: straight horizontal and vertical runs, S-bends with
+    axis-aligned ends where a strand shifts sideways (TikZ's
+    `to[out=up, in=down]`), one corner radius so a bundle's corners are
+    concentric, and dotted circles as stadiums.  *Smooth* draws a spline
+    through every point.
   - **Colors:** colored or black.
   - **Exports:** **SVG** downloads it; **Copy TikZ** copies a `tikzpicture`
     (needs only `\usepackage{tikz}`); **.tex** downloads a standalone LaTeX
