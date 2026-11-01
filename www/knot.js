@@ -28,5 +28,6 @@ export async function loadKnots(url = new URL("./ncknot_web.wasm", import.meta.u
     table: () => call(3, ""),
     layout: (request) => call(4, JSON.stringify(request)),
     expand: (request) => call(5, JSON.stringify(request)),
+    kirby: (request) => call(6, JSON.stringify(request)),
   };
 }

@@ -11,9 +11,13 @@
   <header>
     <h1>Knot Workbench</h1>
     <p class="tagline">Draw a knot or build a braid; invariants update as you edit.</p>
+    <nav class="tabs" role="tablist" aria-label="Tools">
+      <button role="tab" id="tab-btn-workbench" data-tab="workbench" aria-selected="true">Workbench</button>
+      <button role="tab" id="tab-btn-kirby" data-tab="kirby" aria-selected="false">Kirby families</button>
+    </nav>
   </header>
 
-  <main>
+  <main id="tab-workbench">
     <section class="editor panel" aria-label="Diagram editor">
       <div class="toolbar" role="toolbar">
         <div class="group" role="radiogroup" aria-label="Mode">
@@ -202,11 +206,126 @@
     </section>
   </main>
 
+  <main id="tab-kirby" hidden>
+    <section class="editor panel" aria-label="Kirby diagram editor">
+      <div class="toolbar" role="toolbar">
+        <div class="group" role="radiogroup" aria-label="Mode">
+          <button data-kmode="draw" class="mode" title="Click to place points; click a point to end there (Esc ends the strand). Start or end on a strand to make a junction. (D)">Draw</button>
+          <button data-kmode="edit" class="mode" title="Drag points, click a strand to label it, click a crossing to flip it (E)">Edit</button>
+          <button data-kmode="box" class="mode" title="Drag a line across strands to put a twist box on them (T)">Twist box</button>
+          <button data-kmode="erase" class="mode" title="Click a point, segment or box to remove it (X)">Erase</button>
+        </div>
+        <div class="group">
+          <button id="k-undo" title="Undo (Ctrl+Z)">Undo</button>
+          <button id="k-redo" title="Redo (Ctrl+Y)">Redo</button>
+        </div>
+        <div class="group">
+          <button id="k-fit" title="Fit the drawing to the view">Fit</button>
+          <button id="k-clear" title="Remove everything">Clear</button>
+          <button id="k-example" title="Load an example family">Example</button>
+        </div>
+        <div class="group">
+          <button id="k-export" title="Copy the diagram as JSON">Copy JSON</button>
+          <button id="k-import" title="Load a diagram from JSON">Load JSON</button>
+        </div>
+      </div>
+      <div class="row k-pen">
+        <label>Draw with <select id="k-pen-handle" aria-label="Handle to draw"></select></label>
+        <label>width <input id="k-pen-width" type="text" size="6" value="1" spellcheck="false" aria-label="Width of new strands"></label>
+      </div>
+
+      <div class="canvas-wrap">
+        <svg id="k-canvas" class="kcanvas" role="img" aria-label="Kirby diagram"></svg>
+        <div id="k-banner" class="banner" hidden></div>
+        <div id="k-hint" class="hint"></div>
+        <div id="k-strand-panel" class="box-panel sel-panel" hidden>
+          <span class="box-title">Strand</span>
+          <select id="k-strand-handle" aria-label="Handle"></select>
+          <label>width <input id="k-strand-width" type="text" size="6" spellcheck="false"></label>
+          <button id="k-strand-flip" title="Reverse its direction">Flip</button>
+          <button id="k-strand-delete" title="Remove the strand">Remove</button>
+        </div>
+        <div id="k-box-panel" class="box-panel" hidden>
+          <span class="box-title">Twist box</span>
+          <label>half-twists <input id="k-box-twists" type="text" size="6" spellcheck="false"></label>
+          <select id="k-box-units" aria-label="What twists">
+            <option value="ribbons">each strand as a flat ribbon</option>
+            <option value="strands">every single strand</option>
+          </select>
+          <button id="k-box-delete">Remove</button>
+        </div>
+      </div>
+
+      <details class="builder" open>
+        <summary>Handles</summary>
+        <div class="builder-body">
+          <div id="k-handles" class="khandles"></div>
+          <div class="row">
+            <button id="k-add-framed">+ 2-handle</button>
+            <button id="k-add-dotted">+ dotted circle</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="builder" open>
+        <summary>Parameters</summary>
+        <div class="builder-body">
+          <div id="k-params" class="khandles"></div>
+          <div class="row">
+            <input id="k-param-name" type="text" size="5" spellcheck="false" placeholder="name" aria-label="New parameter name">
+            <button id="k-param-add">Add parameter</button>
+          </div>
+          <p class="note">Widths, framings and twist counts are polynomials in the parameters, such as <code>n+1</code>, <code>2m-1</code> or <code>n(n+1)/2</code>. The handle data on the right holds for all values at once; tables and PD codes use the ranges.</p>
+        </div>
+      </details>
+    </section>
+
+    <section class="kresults panel" aria-label="Kirby computations" aria-live="polite">
+      <div id="k-status" class="ident"></div>
+      <div class="card">
+        <h2>Moves</h2>
+        <div class="row">
+          <label>Cancel <select id="k-move-dotted" aria-label="Dotted circle"></select></label>
+          <label>with <select id="k-move-handle" aria-label="2-handle through it"></select></label>
+          <button id="k-move-add">Apply</button>
+        </div>
+        <ol id="k-moves" class="kmoves"></ol>
+        <p class="note">Cancelling a dotted circle with a 2-handle that passes through it once first slides every other strand through the circle over that handle, then erases both. It acts on whole bundles, so the result holds for every member of the family.</p>
+      </div>
+      <div id="k-stages"></div>
+      <div class="card">
+        <h2>Members <span class="note">the final diagram drawn out for each value</span></h2>
+        <div class="row" id="k-ranges"></div>
+        <div class="row">
+          <label>Alexander up to <input id="k-alex" type="number" min="0" max="200" value="40" style="width:4.5em"> crossings</label>
+          <label>boundary check <select id="k-homs">
+            <option value="0">off</option><option value="3">S₃</option><option value="4">S₄</option>
+          </select></label>
+        </div>
+        <div class="row">
+          <button id="k-table-go">Compute</button>
+          <button id="k-table-cancel" hidden>Cancel</button>
+          <button id="k-table-csv" hidden>Download CSV</button>
+          <span id="k-table-status" class="note"></span>
+        </div>
+        <div id="k-table" class="khovanov"></div>
+      </div>
+      <div class="card">
+        <h2>PD code of one member <button id="k-pd-copy" class="small">Copy</button></h2>
+        <div class="row" id="k-values"></div>
+        <div class="row"><button id="k-pd-go">Get PD code</button><span id="k-pd-status" class="note"></span></div>
+        <code id="k-pd" class="pd"></code>
+        <p class="note">Paste it into the Workbench's PD code box to draw it and compute its invariants there.</p>
+      </div>
+    </section>
+  </main>
+
   <footer>
     Computed exactly in the browser by <code>ncknot</code> (Rust → WebAssembly).
     Conventions: σᵢ and the right-handed trefoil are positive; σ(right-handed trefoil) = −2.
   </footer>
 
   <script type="module" src="app.js"></script>
+  <script type="module" src="kirby.js"></script>
 </body>
 </html>

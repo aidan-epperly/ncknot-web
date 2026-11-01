@@ -88,17 +88,66 @@ The build needs Rust's `wasm32-unknown-unknown` target
   or its mirror, the panel says so. A match is evidence, not a proof of
   isotopy.
 
+## The Kirby families tab
+
+The second tab is an editor for families of Kirby diagrams, drawn the way
+they are drawn by hand: bundles of `n` parallel strands, twist boxes of `m`
+half-twists, dotted circles.  The drawing becomes a computational object
+(ncknot's `kirby::KirbyDiagram`), and everything is computed for all values
+of the parameters at once.
+
+- **Handles.** Dotted circles (1-handles) and 2-handles, each with a framing
+  that can be an expression such as `0` or `-n`.
+- **Parameters.** Named integers, optionally odd or even, with a range used
+  by the tables.
+- **Draw** (`D`): click to place points; click a point or a strand to end
+  there.  Starting or ending on a strand makes a junction, where a bundle
+  splits into side-by-side parts (one strand at a junction must be the sum
+  of the others, like `n+1 = n + 1`).  New strands get the handle and width
+  chosen above the canvas.
+- **Edit** (`E`): drag points; click a strand to set its handle, width (an
+  expression) and direction; click a crossing to flip it.
+- **Twist box** (`T`): drag a line across strands.  Its half-twists are an
+  expression; the strands crossing the line twist around each other as flat
+  ribbons, or every single strand twists.
+- **On the right**, updated as you draw:
+  - each handle's framing and writhe, and the linking numbers, as
+    polynomials in the parameters;
+  - each is checked against the drawn-out members at small values.
+- **Moves.** Cancel a dotted circle with a 2-handle through it once.  The
+  other strands through the circle slide over the handle first.  It is done
+  on whole bundles, so the new framings and linking numbers are again
+  polynomials.
+- **Members.** A table over the parameter ranges of the final diagram,
+  drawn out.  Columns:
+  - crossings and components;
+  - writhe `w` and Seifert circles `s`;
+  - components `c₊`, `c₋` of the Seifert graph without its negative
+    (positive) crossings;
+  - `w − s + 2c₊ − 1` and `−w − s + 2c₋ − 1`;
+  - the Alexander polynomial (up to a crossing limit);
+  - optionally, homomorphism counts from the boundary 3-manifold's group to
+    `S₃` or `S₄` at every stage.  The moves keep the boundary, so these
+    counts must agree.
+
+  The table downloads as CSV.  The PD code of any member can be pasted into
+  the Workbench tab.
+- **Example** loads a two-parameter family with a dotted circle; **Copy
+  JSON** / **Load JSON** save and share diagrams.
+
 ## How the Rust/WebAssembly part works
 
 - **The Rust crate.** It compiles to a `.wasm` module for the target
   `wasm32-unknown-unknown`:
   - `src/geometry.rs` turns a drawing into a PD code;
-  - `src/api.rs` answers JSON requests with ncknot.
+  - `src/api.rs` answers JSON requests with ncknot;
+  - `src/kirby.rs` turns a Kirby tab drawing into a `KirbyDiagram` and
+    answers its requests.
 
   ncknot and ncalg build for this target with their default `parallel`
   feature turned off. That feature only switches faer's thread pool;
   WebAssembly in a browser has no OS threads.
-- **The interface.** It is four exported functions (`src/lib.rs`; `call` dispatches to five tasks) that pass
+- **The interface.** It is four exported functions (`src/lib.rs`; `call` dispatches to seven tasks) that pass
   UTF-8 JSON through the module's linear memory:
   1. JavaScript asks for an input buffer;
   2. it writes the request into the buffer;
@@ -159,7 +208,8 @@ tests/geometry.rs native tests: pentagram = 5_1 when alternating, Hopf
 tests/twist_boxes.rs  boxes against integer tangle closures (T(2,n), unknot) and
                   k-strand boxes against braid closures of Δⁿ
 tests/layout.rs   layouts round-trip: table knots, random braids, split links
-tests/browser/    smoke.py, features.py, drag.py, bundle.py, params.py, restart.py: Playwright (Edge) end-to-end checks
+tests/kirby_tab.rs  a drawn Kirby family against the one built by hand in ncknot; moves, tables, errors
+tests/browser/    smoke.py, features.py, drag.py, bundle.py, params.py, restart.py, kirby.py: Playwright (Edge) end-to-end checks
 build.py          build and serve
 ```
 
@@ -174,6 +224,7 @@ python tests/browser/drag.py http://localhost:8765/ target/screenshots
 python tests/browser/bundle.py http://localhost:8765/ target/screenshots
 python tests/browser/params.py http://localhost:8765/ target/screenshots
 python tests/browser/restart.py http://localhost:8765/ target/screenshots
+python tests/browser/kirby.py http://localhost:8765/ target/screenshots
 ```
 
 The browser test runs in Edge and checks:

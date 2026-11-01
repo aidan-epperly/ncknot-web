@@ -7,7 +7,7 @@
 //! number, and reads the UTF-8 JSON answer at [`output_ptr`] /
 //! [`output_len`].  Functions: 0 analyze a drawing, 1 alternating
 //! over-strands, 2 compute invariants, 3 the knot table, 4 lay out a PD code,
-//! 5 expand bundles (for display).
+//! 5 expand bundles (for display), 6 the Kirby tab ([`kirby`]).
 //!
 //! The page instantiates the module twice: on the main thread for drawing
 //! analysis (fast, called while dragging) and in a Web Worker for the
@@ -20,6 +20,7 @@
 pub mod api;
 pub mod bundle;
 pub mod geometry;
+pub mod kirby;
 pub mod layout;
 pub mod relax;
 
@@ -57,6 +58,7 @@ pub extern "C" fn call(f: u32) -> usize {
             3 => api::table_json(),
             4 => api::layout_json(&s),
             5 => api::expand_json(&s),
+            6 => kirby::kirby_json(&s),
             _ => r#"{"error":"unknown function"}"#.to_string(),
         },
     };
