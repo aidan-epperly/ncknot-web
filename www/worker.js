@@ -11,7 +11,6 @@ import { loadKnots } from "./knot.js";
 const ready = loadKnots();
 
 function run(knots, request) {
-  if (request.kirby) return knots.kirby(request.kirby); // the Kirby tab
   if (request.drawing) {
     const { drawing, ...rest } = request;
     const a = knots.analyze(drawing);

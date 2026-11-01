@@ -625,7 +625,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=b5e758de3a", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.
