@@ -3,7 +3,7 @@
 // (src/kirby.rs).  The drawing is a graph of straight segments; every
 // segment carries a handle, a width (an expression) and a direction.
 
-import { figure, drawSvg, svgFile, tikz, texDocument } from "./fancy.js?v=7160eb960c";
+import { figure, drawSvg, svgFile, tikz, texDocument, bounds } from "./fancy.js?v=9276374899";
 
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
@@ -644,7 +644,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./kirby-worker.js?v=7160eb960c", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=9276374899", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.
@@ -1126,10 +1126,29 @@ function download(name, text, type) {
   a.click();
 }
 
+/// Frames the figure (its curves reach past the drawn points).
+function fitFigure() {
+  const b = bounds(currentFigure(), 20);
+  const r = svg.getBoundingClientRect();
+  const aspect = r.width / Math.max(1, r.height) || 4 / 3;
+  let { x, y, w, h } = b;
+  if (w / h > aspect) {
+    const nh = w / aspect;
+    y -= (nh - h) / 2;
+    h = nh;
+  } else {
+    const nw = h * aspect;
+    x -= (nw - w) / 2;
+    w = nw;
+  }
+  view = { x, y, w, h };
+}
+
 $("k-fancy").onclick = () => {
   if (mode === "draw") endStrand();
   fancy = !fancy;
   selChain = selBox = null;
+  if (fancy) fitFigure();
   render();
 };
 $("k-colored").onchange = render;
@@ -1147,7 +1166,7 @@ $("k-tikz").onclick = async () => {
 
 $("k-undo").onclick = () => (undo(), renderAll());
 $("k-redo").onclick = () => (redo(), renderAll());
-$("k-fit").onclick = fit;
+$("k-fit").onclick = () => (fancy ? (fitFigure(), render()) : fit());
 $("k-clear").onclick = () => {
   snapshot();
   state = emptyState();

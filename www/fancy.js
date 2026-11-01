@@ -117,6 +117,42 @@ function sampleRounded(points, closed, r, step) {
   return out.filter((p, k) => k === 0 || len(sub(p, out[k - 1])) > 1e-6);
 }
 
+/// Samples a centripetal Catmull–Rom spline through the points (a smooth
+/// curve that passes through every point without loops or cusps), a point
+/// every `step` units.  Open curves start and end along their end segments.
+function sampleSpline(points, closed, step) {
+  let pts = closed ? points.slice(0, -1) : points.slice();
+  // drop repeated points
+  pts = pts.filter((q, k) => k === 0 || len(sub(q, pts[k - 1])) > 1e-6);
+  const m = pts.length;
+  if (m < 2) return pts;
+  const at = (k) => {
+    if (closed) return pts[((k % m) + m) % m];
+    if (k < 0) return [2 * pts[0][0] - pts[1][0], 2 * pts[0][1] - pts[1][1]];
+    if (k >= m) return [2 * pts[m - 1][0] - pts[m - 2][0], 2 * pts[m - 1][1] - pts[m - 2][1]];
+    return pts[k];
+  };
+  const out = [pts[0]];
+  const spans = closed ? m : m - 1;
+  for (let i = 0; i < spans; i++) {
+    const P0 = at(i - 1), P1 = at(i), P2 = at(i + 1), P3 = at(i + 2);
+    const d = (a, b) => Math.max(Math.sqrt(len(sub(b, a))), 1e-4);
+    const t0 = 0, t1 = t0 + d(P0, P1), t2 = t1 + d(P1, P2), t3 = t2 + d(P2, P3);
+    const lerp = (a, b, ta, tb, t) => {
+      const u = (t - ta) / (tb - ta);
+      return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+    };
+    const n = Math.max(2, Math.ceil(len(sub(P2, P1)) / step));
+    for (let k = 1; k <= n; k++) {
+      const t = t1 + ((t2 - t1) * k) / n;
+      const A1 = lerp(P0, P1, t0, t1, t), A2 = lerp(P1, P2, t1, t2, t), A3 = lerp(P2, P3, t2, t3, t);
+      const B1 = lerp(A1, A2, t0, t2, t), B2 = lerp(A2, A3, t1, t3, t);
+      out.push(lerp(B1, B2, t1, t2, t));
+    }
+  }
+  return out;
+}
+
 /// Unit normals pointing right of the direction of travel (y down).
 function normals(c) {
   return c.map((_, k) => {
@@ -150,7 +186,7 @@ const SIZE = {
   radius: 46, // rounded corners
   stroke: 2, // pen width
   gap: 7, // half a gap at a crossing
-  fan: 70, // how far a part of a bundle bends into the bundle
+  fan: 110, // how far a part of a bundle bends into the bundle
 };
 
 /// Everything the figure shows, in drawing coordinates (y down).
@@ -245,10 +281,9 @@ export function figure(state, { chains, crossings, color }) {
   for (const st of strands) if (!st.pattern) st.pattern = symbolic(st.width);
 
   const maxHalf = Math.max(0, ...strands.map((st) => ((st.pattern.length - 1) / 2) * SIZE.spacing));
-  const radius = Math.max(SIZE.radius, maxHalf + 22);
   // centerlines
   for (const st of strands) {
-    st.center = sampleRounded(st.points, st.closed, radius, 3);
+    st.center = sampleSpline(st.points, st.closed, 3);
     st.normal = normals(st.center);
     st.s = arcLengths(st.center);
   }
@@ -284,15 +319,32 @@ export function figure(state, { chains, crossings, color }) {
       if (!p.atStart) list.reverse(); // left to right leaving the junction
       parts.push(...list.map((cv) => ({ cv, atStart: p.atStart })));
     }
+    // the whole's heading into the junction, as a unit vector
+    const hl = len(h) || 1;
+    const head = [h[0] / hl, h[1] / hl];
     for (let i = 0; i < Math.min(anchors.length, parts.length); i++) {
       const { cv, atStart } = parts[i];
-      const st = strands[cv.chain];
-      const total = st.s[st.s.length - 1];
-      const delta = sub(anchors[i], endOf(cv, atStart));
-      cv.points = cv.points.map((q, k) => {
-        const w = smooth((atStart ? st.s[k] : total - st.s[k]) / SIZE.fan);
-        return [q[0] + w * delta[0], q[1] + w * delta[1]];
-      });
+      const pts = atStart ? cv.points : cv.points.slice().reverse(); // leaving the junction
+      const sl = arcLengths(pts);
+      const L = Math.min(SIZE.fan, 0.45 * sl[sl.length - 1]);
+      let k = 1;
+      while (k < pts.length - 2 && sl[k] < L) k++;
+      // a cubic from the anchor, along the whole's heading, into the part's
+      // strand at distance L, along it
+      const A = anchors[i], Q = pts[k];
+      const tq = sub(pts[Math.min(pts.length - 1, k + 2)], pts[Math.max(0, k - 2)]);
+      const tl = len(tq) || 1;
+      const reach = len(sub(Q, A));
+      const m0 = [head[0] * reach, head[1] * reach], m1 = [(tq[0] / tl) * reach, (tq[1] / tl) * reach];
+      const n = Math.max(6, Math.ceil(reach / 3));
+      const join = [];
+      for (let q = 0; q <= n; q++) {
+        const t = q / n, t2 = t * t, t3 = t2 * t;
+        const a = 2 * t3 - 3 * t2 + 1, b = t3 - 2 * t2 + t, c = -2 * t3 + 3 * t2, d = t3 - t2;
+        join.push([a * A[0] + b * m0[0] + c * Q[0] + d * m1[0], a * A[1] + b * m0[1] + c * Q[1] + d * m1[1]]);
+      }
+      const joined = join.concat(pts.slice(k + 1));
+      cv.points = atStart ? joined : joined.reverse();
     }
   }
 
@@ -377,7 +429,7 @@ export function figure(state, { chains, crossings, color }) {
     for (let k = 0; k < st.center.length; k += 3) {
       if (!st.closed && (st.s[k] < 45 || total - st.s[k] < 45)) continue;
       const a = st.normal[Math.max(0, k - 6)], b = st.normal[Math.min(st.center.length - 1, k + 6)];
-      if (a[0] * b[0] + a[1] * b[1] < 0.995) continue; // on a curve
+      if (a[0] * b[0] + a[1] * b[1] < 0.98) continue; // on a bend
       const c = st.center[k];
       const room = Math.min(1e9, ...obstacles.map((o) => len(sub(o, c))));
       if (!best || room > best.room) best = { k, room };
@@ -409,9 +461,16 @@ export function figure(state, { chains, crossings, color }) {
     if (h?.kind === "dotted") dots.push({ x: c[0], y: c[1], color: st.color });
     // a single strand's width (other than 1) as a label
     if (n && st.pattern.every((x) => !x.label) && st.width !== "1" && !isConstant(st.width)) {
-      // beside the bundle, on its left, clear of its outermost strand
+      // beside the bundle, clear of its outermost strand, on the side with
+      // more room
       const half = ((n - 1) / 2) * SIZE.spacing + 9;
-      const side = [-nrm[0], -nrm[1]];
+      const room = (dx, dy) => {
+        const x = c[0] + dx * (half + 14), y = c[1] + dy * (half + 14);
+        let r = Infinity;
+        for (const cv of curves) for (let k = 0; k < cv.points.length; k += 4) r = Math.min(r, len(sub(cv.points[k], [x, y])));
+        return r;
+      };
+      const side = room(-nrm[0], -nrm[1]) >= room(nrm[0], nrm[1]) ? [-nrm[0], -nrm[1]] : [nrm[0], nrm[1]];
       const anchor = Math.abs(side[0]) < 0.3 ? "middle" : side[0] < 0 ? "end" : "start";
       labels.push({ x: c[0] + side[0] * half, y: c[1] + side[1] * (half + (anchor === "middle" ? 8 : 0)), text: st.width, color: st.color, anchor });
     }
@@ -451,17 +510,18 @@ export function figure(state, { chains, crossings, color }) {
     const u = [d[0] / l, d[1] / l];
     const top = [u[1], -u[0]]; // from the box's bottom side to its top side
     // cover the drawn strands of the bundles through it
-    let half = 0;
-    const enter = []; // where strands meet the box line, from its middle
-    for (const st of strands) {
-      for (let k = 0; k + 1 < st.points.length; k++) {
-        const hit = segIntersect(st.points[k], st.points[k + 1], p, q);
-        if (!hit) continue;
-        const h = ((st.pattern.length - 1) / 2) * SIZE.spacing;
-        half = Math.max(half, h);
-        enter.push((hit[1] - 0.5) * l - h, (hit[1] - 0.5) * l + h);
+    // where the drawn strands meet the box line (extended a little), from
+    // its middle
+    const ep = [p[0] - (d[0] / l) * 40, p[1] - (d[1] / l) * 40], eq = [q[0] + (d[0] / l) * 40, q[1] + (d[1] / l) * 40];
+    const el = l + 80;
+    const enter = [];
+    for (const cv of curves) {
+      for (let k = 0; k + 1 < cv.points.length; k++) {
+        const hit = segIntersect(cv.points[k], cv.points[k + 1], ep, eq);
+        if (hit) enter.push(hit[1] * el - 40 - l / 2);
       }
     }
+    const half = enter.length ? Math.max(0, Math.max(...enter.map(Math.abs)) - l / 2) : 0;
     const ext = 12 + half;
     const depth = 34;
     const P = (a, v) => [(p[0] + q[0]) / 2 + u[0] * a + top[0] * v, (p[1] + q[1]) / 2 + u[1] * a + top[1] * v];
