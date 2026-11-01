@@ -410,7 +410,7 @@ export function figure(state, { chains, crossings, color, curves: curveStyle = "
       const { cv, atStart } = parts[i];
       const pts = atStart ? cv.points : cv.points.slice().reverse(); // leaving the junction
       const sl = arcLengths(pts);
-      const L = Math.min(curveStyle === "smooth" ? SIZE.fan : 45, 0.45 * sl[sl.length - 1]);
+      const L = Math.min(curveStyle === "smooth" ? SIZE.fan : 170, 0.45 * sl[sl.length - 1]);
       let k = 1;
       while (k < pts.length - 2 && sl[k] < L) k++;
       // a cubic from the anchor, along the whole's heading, into the part's
