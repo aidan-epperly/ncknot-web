@@ -150,7 +150,7 @@ const SIZE = {
   radius: 46, // rounded corners
   stroke: 2, // pen width
   gap: 7, // half a gap at a crossing
-  fan: 60, // how far a bundle's part takes to leave its side
+  fan: 70, // how far a part of a bundle bends into the bundle
 };
 
 /// Everything the figure shows, in drawing coordinates (y down).
@@ -246,45 +246,55 @@ export function figure(state, { chains, crossings, color }) {
 
   const maxHalf = Math.max(0, ...strands.map((st) => ((st.pattern.length - 1) / 2) * SIZE.spacing));
   const radius = Math.max(SIZE.radius, maxHalf + 22);
-  // centerlines, and the sideways shift of a part leaving its side of a bundle
+  // centerlines
   for (const st of strands) {
     st.center = sampleRounded(st.points, st.closed, radius, 3);
     st.normal = normals(st.center);
     st.s = arcLengths(st.center);
-    st.shiftStart = 0;
-    st.shiftEnd = 0;
-  }
-  for (const j of junctions) {
-    const w = strands[j.whole.chain];
-    const n = w.pattern.length;
-    let k = 0;
-    for (const p of j.parts) {
-      const st = strands[p.chain];
-      const m = st.pattern.length;
-      const mid = k + (m - 1) / 2 - (n - 1) / 2;
-      k += m;
-      // right of the whole's heading = right of the part leaving the junction
-      if (p.atStart) st.shiftStart = mid * SIZE.spacing;
-      else st.shiftEnd = -mid * SIZE.spacing;
-    }
   }
   const smooth = (t) => (t <= 0 ? 1 : t >= 1 ? 0 : 1 - t * t * (3 - 2 * t));
-  // the drawn strands
+  // the drawn strands, parallel to the centerlines
   const curves = [];
+  const chainCurves = strands.map(() => []);
   strands.forEach((st, ci) => {
     const n = st.pattern.length;
-    const total = st.s[st.s.length - 1];
     st.pattern.forEach((item, j) => {
       if (item.kind !== "s") return;
-      const off = (j - (n - 1) / 2) * SIZE.spacing;
-      const pts = st.center.map((c, k) => {
-        const extra = st.shiftStart * smooth(st.s[k] / SIZE.fan) + st.shiftEnd * smooth((total - st.s[k]) / SIZE.fan);
-        const o = off + extra;
-        return [c[0] + st.normal[k][0] * o, c[1] + st.normal[k][1] * o];
-      });
-      curves.push({ chain: ci, points: pts, color: st.color, gaps: [] });
+      const off = (j - (n - 1) / 2) * SIZE.spacing; // to the right of the walk
+      const pts = st.center.map((c, k) => [c[0] + st.normal[k][0] * off, c[1] + st.normal[k][1] * off]);
+      const cv = { chain: ci, off, points: pts, color: st.color, gaps: [] };
+      curves.push(cv);
+      chainCurves[ci].push(cv);
     });
   });
+  // at a junction the strands of the whole bundle, left to right, continue
+  // into the strands of its parts, left to right: each part's strands bend
+  // into the whole's strand ends
+  for (const j of junctions) {
+    const P = pt.get(j.id);
+    const W = strands[j.whole.chain];
+    const endOf = (cv, atStart) => (atStart ? cv.points[0] : cv.points[cv.points.length - 1]);
+    const wc = W.center;
+    const h = j.whole.atStart ? sub(wc[0], wc[Math.min(6, wc.length - 1)]) : sub(wc[wc.length - 1], wc[Math.max(0, wc.length - 7)]);
+    const lateral = (q) => h[0] * (q[1] - P[1]) - h[1] * (q[0] - P[0]); // > 0: right of the heading
+    const anchors = chainCurves[j.whole.chain].map((cv) => endOf(cv, j.whole.atStart)).sort((a, b) => lateral(a) - lateral(b));
+    const parts = [];
+    for (const p of j.parts) {
+      const list = chainCurves[p.chain].slice().sort((a, b) => a.off - b.off);
+      if (!p.atStart) list.reverse(); // left to right leaving the junction
+      parts.push(...list.map((cv) => ({ cv, atStart: p.atStart })));
+    }
+    for (let i = 0; i < Math.min(anchors.length, parts.length); i++) {
+      const { cv, atStart } = parts[i];
+      const st = strands[cv.chain];
+      const total = st.s[st.s.length - 1];
+      const delta = sub(anchors[i], endOf(cv, atStart));
+      cv.points = cv.points.map((q, k) => {
+        const w = smooth((atStart ? st.s[k] : total - st.s[k]) / SIZE.fan);
+        return [q[0] + w * delta[0], q[1] + w * delta[1]];
+      });
+    }
+  }
 
   // crossings: every drawn pair that meets near a crossing of the diagram
   const model = crossings.map((x) => ({
@@ -393,13 +403,17 @@ export function figure(state, { chains, crossings, color }) {
       if (h?.kind === "dotted") return;
       arrows.push({ x: p[0], y: p[1], ux: tan[0] * dirSign, uy: tan[1] * dirSign, color: st.color });
       if (item.label) {
-        labels.push({ x: p[0] - tan[0] * dirSign * 20, y: p[1] - tan[1] * dirSign * 20, text: item.label, color: st.color, small: true });
+        labels.push({ x: p[0] - tan[0] * dirSign * 34, y: p[1] - tan[1] * dirSign * 34, text: item.label, color: st.color, small: true });
       }
     });
     if (h?.kind === "dotted") dots.push({ x: c[0], y: c[1], color: st.color });
     // a single strand's width (other than 1) as a label
     if (n && st.pattern.every((x) => !x.label) && st.width !== "1" && !isConstant(st.width)) {
-      labels.push({ x: c[0] - nrm[0] * (maxHalf + 18), y: c[1] - nrm[1] * (maxHalf + 18), text: st.width, color: st.color });
+      // beside the bundle, on its left, clear of its outermost strand
+      const half = ((n - 1) / 2) * SIZE.spacing + 9;
+      const side = [-nrm[0], -nrm[1]];
+      const anchor = Math.abs(side[0]) < 0.3 ? "middle" : side[0] < 0 ? "end" : "start";
+      labels.push({ x: c[0] + side[0] * half, y: c[1] + side[1] * (half + (anchor === "middle" ? 8 : 0)), text: st.width, color: st.color, anchor });
     }
   });
   // framings, once per 2-handle, beside its longest straight run
@@ -565,7 +579,7 @@ export function drawSvg(svg, fig, { colored = true } = {}) {
   }
   for (const l of fig.labels) {
     const t = el("text", {
-      x: l.x, y: l.y, "text-anchor": "middle", "dominant-baseline": "central",
+      x: l.x, y: l.y, "text-anchor": l.anchor ?? "middle", "dominant-baseline": "central",
       "font-size": l.small ? 12 : 17, "font-style": "italic", "font-family": FONT,
       fill: ink(l.color), "paint-order": "stroke", stroke: "#fff", "stroke-width": 3,
     });
@@ -626,7 +640,8 @@ export function tikz(fig, { colored = true, width_cm = 11 } = {}) {
   }
   for (const l of fig.labels) {
     const size = l.small ? "\\scriptsize" : "";
-    lines.push(`  \\node[${name(l.color)}, inner sep=1pt] at ${P([l.x, l.y])} {${size}$${texExpr(l.text)}$};`);
+    const anchor = l.anchor === "end" ? ", anchor=east" : l.anchor === "start" ? ", anchor=west" : "";
+    lines.push(`  \\node[${name(l.color)}, inner sep=1pt${anchor}] at ${P([l.x, l.y])} {${size}$${texExpr(l.text)}$};`);
   }
   const defs = [...colors].map(([c, n]) => `\\definecolor{${n}}{HTML}{${c.replace("#", "").toUpperCase()}}`);
   return [

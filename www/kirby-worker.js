@@ -2,9 +2,9 @@
 // Messages in: { id, request: { kirby: request } }; out: { id, result }.
 // The ?v= stamps (written by build.py) keep a new deploy from mixing with
 // cached files of an older one.
-import { loadKnots } from "./knot.js?v=5625af5cb8";
+import { loadKnots } from "./knot.js?v=658ee4a540";
 
-const ready = loadKnots(new URL("./ncknot_web.wasm?v=5625af5cb8", import.meta.url));
+const ready = loadKnots(new URL("./ncknot_web.wasm?v=658ee4a540", import.meta.url));
 
 self.onmessage = async (event) => {
   const knots = await ready;
