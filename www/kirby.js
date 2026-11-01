@@ -3,7 +3,7 @@
 // (src/kirby.rs).  The drawing is a graph of straight segments; every
 // segment carries a handle, a width (an expression) and a direction.
 
-import { figure, drawSvg, svgFile, tikz, texDocument } from "./fancy.js?v=658ee4a540";
+import { figure, drawSvg, svgFile, tikz, texDocument } from "./fancy.js?v=7160eb960c";
 
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
@@ -644,7 +644,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./kirby-worker.js?v=658ee4a540", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=7160eb960c", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.

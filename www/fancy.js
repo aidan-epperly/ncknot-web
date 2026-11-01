@@ -641,7 +641,7 @@ export function tikz(fig, { colored = true, width_cm = 11 } = {}) {
   for (const l of fig.labels) {
     const size = l.small ? "\\scriptsize" : "";
     const anchor = l.anchor === "end" ? ", anchor=east" : l.anchor === "start" ? ", anchor=west" : "";
-    lines.push(`  \\node[${name(l.color)}, inner sep=1pt${anchor}] at ${P([l.x, l.y])} {${size}$${texExpr(l.text)}$};`);
+    lines.push(`  \\node[${name(l.color)}, fill=white, inner sep=0.6pt${anchor}] at ${P([l.x, l.y])} {${size}$${texExpr(l.text)}$};`);
   }
   const defs = [...colors].map(([c, n]) => `\\definecolor{${n}}{HTML}{${c.replace("#", "").toUpperCase()}}`);
   return [
