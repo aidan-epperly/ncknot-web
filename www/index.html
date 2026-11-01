@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Knot Workbench</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4 L27 24 L5 24 Z' fill='none' stroke='%232f5fd0' stroke-width='3'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=56e97e2a12">
+  <link rel="stylesheet" href="style.css?v=81ba78b273">
 </head>
 <body>
   <header>
@@ -228,10 +228,17 @@
           <button id="k-export" title="Copy the diagram as JSON">Copy JSON</button>
           <button id="k-import" title="Load a diagram from JSON">Load JSON</button>
         </div>
+        <div class="group">
+          <button id="k-fancy" class="mode" aria-pressed="false" title="Show the diagram as a figure for a paper (F)">Figure view</button>
+          <button id="k-svg" title="Download the figure as SVG">SVG</button>
+          <button id="k-tikz" title="Copy the figure as a TikZ picture">Copy TikZ</button>
+          <button id="k-tex" title="Download the figure as a LaTeX file (compiles with pdflatex)">.tex</button>
+        </div>
       </div>
       <div class="row k-pen">
         <label>Draw with <select id="k-pen-handle" aria-label="Handle to draw"></select></label>
         <label>width <input id="k-pen-width" type="text" size="6" value="1" spellcheck="false" aria-label="Width of new strands"></label>
+        <label title="Figures and exports in the handles' colors; off: black"><input type="checkbox" id="k-colored" checked> colored figure</label>
       </div>
 
       <div class="canvas-wrap">
@@ -326,6 +333,6 @@
   </footer>
 
   <script type="module" src="app.js"></script>
-  <script type="module" src="kirby.js?v=56e97e2a12"></script>
+  <script type="module" src="kirby.js?v=81ba78b273"></script>
 </body>
 </html>

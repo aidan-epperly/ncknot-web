@@ -38,7 +38,7 @@ def stamp():
     import hashlib
     import re
 
-    files = ["index.html", "kirby.js", "kirby-worker.js", "knot.js", "style.css", "ncknot_web.wasm"]
+    files = ["index.html", "kirby.js", "kirby-worker.js", "fancy.js", "knot.js", "style.css", "ncknot_web.wasm"]
     pattern = re.compile(rb"\?v=[0-9a-f]+")
     h = hashlib.sha256()
     for f in files:

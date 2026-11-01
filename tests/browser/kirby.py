@@ -74,6 +74,27 @@ with sync_playwright() as p:
     page.click("#k-fit")
     page.screenshot(path=OUT / "kirby_example.png")
 
+    # the figure view and its exports
+    page.click("#k-fancy")
+    assert page.get_attribute("#k-fancy", "aria-pressed") == "true"
+    assert page.locator("#k-canvas circle.kpt").count() == 0  # no editing marks
+    assert page.locator("#k-canvas path").count() > 20
+    page.locator("#k-canvas").screenshot(path=OUT / "kirby_figure.png")
+    tex = page.evaluate("kirbyTab.tex()")
+    assert tex.startswith(r"\documentclass") and r"\begin{tikzpicture}" in tex and "$m$" in tex and "$n+1$" in tex, tex[:300]
+    (OUT / "kirby_figure.tex").write_text(tex, encoding="utf-8")
+    svg = page.evaluate("kirbyTab.svg()")
+    assert svg.startswith("<svg") and "viewBox" in svg
+    with page.expect_download() as dl:
+        page.click("#k-svg")
+    assert dl.value.suggested_filename == "kirby-diagram.svg"
+    page.uncheck("#k-colored")
+    assert "definecolor" not in page.evaluate("kirbyTab.tikz()")
+    page.check("#k-colored")
+    page.click("#k-fancy")
+    assert page.locator("#k-canvas circle.kpt").count() > 0
+    print("figure view and TikZ export OK")
+
     # cancel R with B
     n0 = page.evaluate("kirbyTab.summaries()")
     page.select_option("#k-move-dotted", "R")

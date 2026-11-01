@@ -138,6 +138,13 @@ of the parameters at once.
   the Workbench tab.
 - **Example** loads a two-parameter family with a dotted circle; **Copy
   JSON** / **Load JSON** save and share diagrams.
+- **Figure view** (`F`) shows the diagram as a figure for a paper: rounded
+  strands, bundles as hollow ribbons labeled with their widths, framings,
+  the dots of dotted circles, twist boxes, and no editing marks; colored or
+  black.  **SVG** downloads it, **Copy TikZ** copies a `tikzpicture` (needs
+  `\usepackage{tikz}` and `\usetikzlibrary{arrows.meta}`), and **.tex**
+  downloads a standalone LaTeX file that compiles with pdflatex.
+  `www/fancy.js` draws both from the same description.
 
 ## How the Rust/WebAssembly part works
 

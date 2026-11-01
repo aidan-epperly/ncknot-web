@@ -3,6 +3,8 @@
 // (src/kirby.rs).  The drawing is a graph of straight segments; every
 // segment carries a handle, a width (an expression) and a direction.
 
+import { figure, drawSvg, svgFile, tikz, texDocument } from "./fancy.js?v=81ba78b273";
+
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
 const COLORS = ["#c83737", "#2f6fd0", "#2f9a4a", "#9b4fc0", "#d07a1a", "#1f9090", "#6b7280", "#b0407a"];
@@ -34,6 +36,7 @@ let selBox = null;
 let view = { x: 0, y: 0, w: 1200, h: 900 };
 let boxDraft = null;
 let drag = null;
+let fancy = false; // the figure view
 
 function snapshot() {
   past.push(JSON.stringify(state));
@@ -345,8 +348,24 @@ function el(name, attrs, parent) {
   return e;
 }
 
+function currentFigure() {
+  return figure(state, { chains: allChains(), crossings: crossings(), color });
+}
+
+const figureOptions = () => ({ colored: $("k-colored").checked });
+
 function render() {
   svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  $("k-fancy").setAttribute("aria-pressed", fancy);
+  if (fancy) {
+    svg.classList.remove("draw");
+    drawSvg(svg, currentFigure(), figureOptions());
+    renderPanels();
+    $("k-strand-panel").hidden = true;
+    $("k-box-panel").hidden = true;
+    $("k-hint").textContent = "Figure view: drag to move the view, scroll to zoom. Export with SVG, Copy TikZ or .tex; press Figure view again to edit.";
+    return;
+  }
   svg.classList.toggle("draw", mode === "draw" || mode === "box");
   svg.replaceChildren();
   const xs = crossings();
@@ -625,7 +644,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./kirby-worker.js?v=56e97e2a12", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=81ba78b273", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.
@@ -900,6 +919,7 @@ function fit() {
 // ---------------------------------------------------------------- events
 
 function setMode(m) {
+  fancy = false;
   if (mode === "draw" && m !== "draw") endStrand();
   mode = m;
   boxDraft = null;
@@ -919,7 +939,7 @@ function startPan(e) {
 
 svg.addEventListener("pointerdown", (e) => {
   const w = toWorld(e);
-  if (e.button === 1 || spaceHeld) {
+  if (e.button === 1 || spaceHeld || fancy) {
     e.preventDefault();
     return startPan(e);
   }
@@ -1098,6 +1118,33 @@ $("k-box-delete").onclick = () => {
   changed();
 };
 
+function download(name, text, type) {
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(new Blob([text], { type })),
+    download: name,
+  });
+  a.click();
+}
+
+$("k-fancy").onclick = () => {
+  if (mode === "draw") endStrand();
+  fancy = !fancy;
+  selChain = selBox = null;
+  render();
+};
+$("k-colored").onchange = render;
+$("k-svg").onclick = () => download("kirby-diagram.svg", svgFile(currentFigure(), figureOptions()), "image/svg+xml");
+$("k-tex").onclick = () => download("kirby-diagram.tex", texDocument(currentFigure(), figureOptions()), "text/x-tex");
+$("k-tikz").onclick = async () => {
+  const text = tikz(currentFigure(), figureOptions());
+  try {
+    await navigator.clipboard.writeText(text);
+    $("k-status").textContent = "Copied the TikZ picture (it needs \\usepackage{tikz} and \\usetikzlibrary{arrows.meta}).";
+  } catch {
+    prompt("Copy the TikZ picture:", text);
+  }
+};
+
 $("k-undo").onclick = () => (undo(), renderAll());
 $("k-redo").onclick = () => (redo(), renderAll());
 $("k-fit").onclick = fit;
@@ -1209,6 +1256,7 @@ window.addEventListener("keydown", (e) => {
   } else if (e.key === "Enter" && mode === "draw") endStrand();
   else if ((e.key === "Delete" || e.key === "Backspace") && selBox !== null) $("k-box-delete").onclick();
   else if ((e.key === "Delete" || e.key === "Backspace") && selChain) $("k-strand-delete").onclick();
+  else if (e.key === "f") $("k-fancy").onclick();
   else if (e.key === "d") setMode("draw");
   else if (e.key === "e") setMode("edit");
   else if (e.key === "t") setMode("box");
@@ -1270,6 +1318,9 @@ window.kirbyTab = {
     fit();
   },
   summary: () => lastSummary,
+  tikz: () => tikz(currentFigure(), figureOptions()),
+  tex: () => texDocument(currentFigure(), figureOptions()),
+  svg: () => svgFile(currentFigure(), figureOptions()),
   summaries: () => summaryCount,
   toScreen: (x, y) => {
     const pt = svg.createSVGPoint();
