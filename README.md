@@ -105,8 +105,12 @@ of the parameters at once.
   splits into side-by-side parts (one strand at a junction must be the sum
   of the others, like `n+1 = n + 1`).  New strands get the handle and width
   chosen above the canvas.
-- **Edit** (`E`): drag points; click a strand to set its handle, width (an
-  expression) and direction; click a crossing to flip it.
+- **Edit** (`E`): drag a point, a whole strand or a box to move it; click a
+  strand to set its handle, width (an expression) and direction; click a
+  crossing to flip it.
+- **The view:** scroll to zoom; Space+drag, middle-drag or the arrow keys
+  pan in any mode (dragging empty space pans in Edit); Fit frames the
+  drawing.
 - **Twist box** (`T`): drag a line across strands.  Its half-twists are an
   expression; the strands crossing the line twist around each other as flat
   ribbons, or every single strand twists.

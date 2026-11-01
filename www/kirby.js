@@ -442,11 +442,11 @@ function renderHint() {
     draw: pending === null
       ? "Click to start a strand (on a point or a strand to branch from it)."
       : "Click to add points; click a point or a strand to end there. Esc ends the strand.",
-    edit: "Drag points. Click a strand to set its handle, width and direction; click a crossing to flip it. Drag empty space to pan, scroll to zoom.",
+    edit: "Drag a point, a strand or a box to move it. Click a strand to set its handle, width and direction; click a crossing to flip it.",
     box: "Drag a line across the strands to twist.",
     erase: "Click a point, a segment or a box to remove it.",
   };
-  $("k-hint").textContent = hints[mode];
+  $("k-hint").textContent = `${hints[mode]} Move the view: Space+drag, middle-drag or arrow keys (or drag empty space in Edit); scroll to zoom.`;
 }
 
 // ---------------------------------------------------------------- panels
@@ -625,7 +625,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./kirby-worker.js?v=b5e758de3a", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=550d2d0a88", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.
@@ -909,8 +909,20 @@ function setMode(m) {
 
 for (const b of document.querySelectorAll("[data-kmode]")) b.onclick = () => setMode(b.dataset.kmode);
 
+let spaceHeld = false;
+
+function startPan(e) {
+  drag = { kind: "pan", from: { x: e.clientX, y: e.clientY }, view: { ...view } };
+  svg.setPointerCapture(e.pointerId);
+  svg.style.cursor = "grabbing";
+}
+
 svg.addEventListener("pointerdown", (e) => {
   const w = toWorld(e);
+  if (e.button === 1 || spaceHeld) {
+    e.preventDefault();
+    return startPan(e);
+  }
   if (mode === "draw") {
     if (e.button === 2) return endStrand();
     return drawClick(w);
@@ -945,26 +957,36 @@ svg.addEventListener("pointerdown", (e) => {
     return;
   }
   // edit
+  const p = hitPoint(w);
+  if (p) {
+    drag = { kind: "move", points: [p], boxes: [], from: w, start: [[p.x, p.y]], moved: false };
+    svg.setPointerCapture(e.pointerId);
+    return;
+  }
   const bi = hitBox(w);
   if (bi !== null) {
     selBox = bi;
     selChain = null;
-    return render();
-  }
-  const p = hitPoint(w);
-  if (p) {
-    drag = { kind: "point", p, moved: false };
+    const b = state.boxes[bi];
+    drag = { kind: "move", points: [], boxes: [b], from: w, start: [[...b.p, ...b.q]], moved: false };
     svg.setPointerCapture(e.pointerId);
-    return;
+    return render();
   }
   const c = hitCrossing(w);
   if (c) return flipCrossing(c);
   const s = hitSeg(w);
-  if (s) return selectChain(s.s.id);
+  if (s) {
+    // a click selects the strand, a drag moves all of it
+    selectChain(s.s.id);
+    const ids = new Set(chainSegs().flatMap((x) => [x.a, x.b]));
+    const pts = state.points.filter((q) => ids.has(q.id));
+    drag = { kind: "move", points: pts, boxes: [], from: w, start: pts.map((q) => [q.x, q.y]), moved: false };
+    svg.setPointerCapture(e.pointerId);
+    return;
+  }
   selChain = null;
   selBox = null;
-  drag = { kind: "pan", from: { x: e.clientX, y: e.clientY }, view: { ...view } };
-  svg.setPointerCapture(e.pointerId);
+  startPan(e);
   render();
 });
 
@@ -975,13 +997,22 @@ svg.addEventListener("pointermove", (e) => {
     boxDraft.q = [w.x, w.y];
     return render();
   }
-  if (drag?.kind === "point") {
+  if (drag?.kind === "move") {
+    const dx = w.x - drag.from.x, dy = w.y - drag.from.y;
     if (!drag.moved) {
+      if (Math.hypot(dx, dy) < 3 * scale()) return;
       snapshot();
       drag.moved = true;
     }
-    drag.p.x = Math.round(w.x);
-    drag.p.y = Math.round(w.y);
+    drag.points.forEach((q, i) => {
+      q.x = Math.round(drag.start[i][0] + dx);
+      q.y = Math.round(drag.start[i][1] + dy);
+    });
+    drag.boxes.forEach((b, i) => {
+      const [px, py, qx, qy] = drag.start[i];
+      b.p = [Math.round(px + dx), Math.round(py + dy)];
+      b.q = [Math.round(qx + dx), Math.round(qy + dy)];
+    });
     return render();
   }
   if (drag?.kind === "pan") {
@@ -1007,9 +1038,12 @@ svg.addEventListener("pointerup", () => {
     } else render();
     return;
   }
-  if (drag?.kind === "point" && drag.moved) changed();
+  if (drag?.kind === "move" && drag.moved) changed();
   drag = null;
+  svg.style.cursor = "";
 });
+
+svg.addEventListener("auxclick", (e) => e.button === 1 && e.preventDefault());
 
 svg.addEventListener("contextmenu", (e) => {
   if (mode === "draw") e.preventDefault();
@@ -1164,6 +1198,14 @@ window.addEventListener("keydown", (e) => {
     selChain = null;
     selBox = null;
     render();
+  } else if (e.key === " ") {
+    spaceHeld = true;
+    svg.style.cursor = "grab";
+  } else if (e.key.startsWith("Arrow")) {
+    const k = 0.1;
+    view.x += { ArrowLeft: -k, ArrowRight: k }[e.key] * view.w || 0;
+    view.y += { ArrowUp: -k, ArrowDown: k }[e.key] * view.h || 0;
+    render();
   } else if (e.key === "Enter" && mode === "draw") endStrand();
   else if ((e.key === "Delete" || e.key === "Backspace") && selBox !== null) $("k-box-delete").onclick();
   else if ((e.key === "Delete" || e.key === "Backspace") && selChain) $("k-strand-delete").onclick();
@@ -1177,6 +1219,13 @@ window.addEventListener("keydown", (e) => {
     e.stopImmediatePropagation();
   }
 }, true);
+
+window.addEventListener("keyup", (e) => {
+  if (e.key === " " && spaceHeld) {
+    spaceHeld = false;
+    if (drag?.kind !== "pan") svg.style.cursor = "";
+  }
+});
 
 // ---------------------------------------------------------------- tabs
 

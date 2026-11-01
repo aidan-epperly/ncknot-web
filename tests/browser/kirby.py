@@ -37,6 +37,41 @@ with sync_playwright() as p:
     hs = {h["name"]: h for h in s["stages"][0]["handles"]}
     assert hs["G"]["writhe"] == "n" and hs["B"]["writhe"] == "m", hs
     print("example:", page.inner_text("#k-status"))
+
+    def viewbox():
+        return [float(v) for v in page.get_attribute("#k-canvas", "viewBox").split()]
+
+    def all_points_inside():
+        x, y, w, h = viewbox()
+        pts = page.evaluate("kirbyTab.state().points.map(p => [p.x, p.y])")
+        return all(x <= px <= x + w and y <= py <= y + h for px, py in pts), w
+
+    # Fit: zoom far in, then Fit shows the whole drawing again
+    box = page.locator("#k-canvas").bounding_box()
+    page.mouse.move(box["x"] + 200, box["y"] + 200)
+    for _ in range(8):
+        page.mouse.wheel(0, -400)
+    assert not all_points_inside()[0]
+    page.click("#k-fit")
+    inside, w = all_points_inside()
+    assert inside and w < 1600, viewbox()
+    print("fit:", viewbox())
+    # pan with Space + drag, in Draw mode
+    before = viewbox()
+    nsegs = page.evaluate("kirbyTab.state().segs.length")
+    page.keyboard.down(" ")
+    page.mouse.move(box["x"] + 300, box["y"] + 300)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 400, box["y"] + 350, steps=5)
+    page.mouse.up()
+    page.keyboard.up(" ")
+    after = viewbox()
+    assert after[0] < before[0] - 50 and after[1] < before[1] - 20, (before, after)
+    assert page.evaluate("kirbyTab.state().segs.length") == nsegs  # nothing was drawn
+    # arrow keys pan too
+    page.keyboard.press("ArrowRight")
+    assert viewbox()[0] > after[0]
+    page.click("#k-fit")
     page.screenshot(path=OUT / "kirby_example.png")
 
     # cancel R with B
@@ -96,6 +131,18 @@ with sync_playwright() as p:
     click(400, 300)
     s2 = wait_summary(page, n0)
     assert s2["stages"][0]["handles"][0]["writhe"] == str(-int(k["writhe"])), s2
+    # drag the whole strand by one of its segments
+    before = page.evaluate("kirbyTab.state().points.map(p => [p.x, p.y])")
+    q0 = page.evaluate("kirbyTab.toScreen(550, 700)")
+    q1 = page.evaluate("kirbyTab.toScreen(600, 700)")
+    page.mouse.move(q0["x"], q0["y"])
+    page.mouse.down()
+    page.mouse.move(q1["x"], q1["y"], steps=5)
+    page.mouse.up()
+    after = page.evaluate("kirbyTab.state().points.map(p => [p.x, p.y])")
+    shifts = {(b[0] - a[0], b[1] - a[1]) for a, b in zip(before, after)}
+    assert len(shifts) == 1 and abs(list(shifts)[0][0] - 50) <= 1, shifts
+    print("dragged the strand by", shifts)
     page.screenshot(path=OUT / "kirby_drawn.png")
 
     # the workbench is untouched and still computes
