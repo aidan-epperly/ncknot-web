@@ -125,8 +125,8 @@ fn drawn_family_matches_the_hand_built_one() {
     assert_eq!(l.writhe[1].display(&names), "n");
     assert_eq!(l.writhe[2].display(&names), "m");
     assert_eq!(l.lk[1][2].display(&names), "0");
-    assert_eq!(l.lk[0][1].as_integer().map(i64::abs), Some(1));
-    assert_eq!(l.lk[0][2].as_integer().map(i64::abs), Some(1));
+    assert_eq!(l.lk[0][1].as_i64().map(i64::abs), Some(1));
+    assert_eq!(l.lk[0][2].as_i64().map(i64::abs), Some(1));
     for n in 1..=3 {
         for m in [-3, -1, 1, 3] {
             k.check(&[n, m]).unwrap();
