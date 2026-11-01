@@ -3,7 +3,7 @@
 // (src/kirby.rs).  The drawing is a graph of straight segments; every
 // segment carries a handle, a width (an expression) and a direction.
 
-import { figure, drawSvg, svgFile, tikz, texDocument } from "./fancy.js?v=81ba78b273";
+import { figure, drawSvg, svgFile, tikz, texDocument } from "./fancy.js?v=5625af5cb8";
 
 const $ = (id) => document.getElementById(id);
 const SVG = "http://www.w3.org/2000/svg";
@@ -644,7 +644,7 @@ function request(task, extra = {}) {
 }
 
 function makeWorker() {
-  return new Worker(new URL("./kirby-worker.js?v=81ba78b273", import.meta.url), { type: "module" });
+  return new Worker(new URL("./kirby-worker.js?v=5625af5cb8", import.meta.url), { type: "module" });
 }
 
 /// A worker that restarts when a new request comes before the last answer.
@@ -1139,7 +1139,7 @@ $("k-tikz").onclick = async () => {
   const text = tikz(currentFigure(), figureOptions());
   try {
     await navigator.clipboard.writeText(text);
-    $("k-status").textContent = "Copied the TikZ picture (it needs \\usepackage{tikz} and \\usetikzlibrary{arrows.meta}).";
+    $("k-status").textContent = "Copied the TikZ picture (it needs \\usepackage{tikz}).";
   } catch {
     prompt("Copy the TikZ picture:", text);
   }

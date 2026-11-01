@@ -138,12 +138,20 @@ of the parameters at once.
   the Workbench tab.
 - **Example** loads a two-parameter family with a dotted circle; **Copy
   JSON** / **Load JSON** save and share diagrams.
-- **Figure view** (`F`) shows the diagram as a figure for a paper: rounded
-  strands, bundles as hollow ribbons labeled with their widths, framings,
-  the dots of dotted circles, twist boxes, and no editing marks; colored or
-  black.  **SVG** downloads it, **Copy TikZ** copies a `tikzpicture` (needs
-  `\usepackage{tikz}` and `\usetikzlibrary{arrows.meta}`), and **.tex**
-  downloads a standalone LaTeX file that compiles with pdflatex.
+- **Figure view** (`F`) draws the diagram the way Kirby diagrams are drawn
+  by hand, as a figure for a paper.
+  - **Bundles:** a few parallel strands numbered 1, 2, …, n−1, n, with ⋯
+    between them; where a bundle splits, its parts leave from their side of
+    it.
+  - **Crossings:** every drawn strand gets its own gap.
+  - **Twist boxes:** they show two crossings and ⋮, with the count beside
+    them.
+  - **Also drawn:** framings, the dots of dotted circles and direction
+    arrows, placed away from crossings; strands have rounded corners.
+  - **Colors:** colored or black.
+  - **Exports:** **SVG** downloads it; **Copy TikZ** copies a `tikzpicture`
+    (needs only `\usepackage{tikz}`); **.tex** downloads a standalone LaTeX
+    file that compiles with pdflatex.
   `www/fancy.js` draws both from the same description.
 
 ## How the Rust/WebAssembly part works
